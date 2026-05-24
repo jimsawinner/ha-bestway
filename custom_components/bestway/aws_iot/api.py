@@ -126,10 +126,7 @@ class AwsIotApi:
         # V02 wave_state actual values: 0=OFF, 40=MEDIUM, 100=HIGH
         # Map to V01 Airjet format (0/50/100) for AIRJET_V01_BUBBLES_MAP compatibility
         # Note: Hydrojet uses 40 for MEDIUM, so no mapping needed there
-        if wave_state == 40:
-            wave_normalized = 50  # Map V02 MEDIUM (40) → V01 Airjet MEDIUM (50)
-        else:
-            wave_normalized = wave_state  # 0 and 100 are same in both
+        wave_normalized = wave_state
 
         # Build normalized dict, only including fields with actual values
         # This prevents None values from overwriting existing data during merges
@@ -859,6 +856,23 @@ class AwsIotApi:
         if target_value is not None:
             await self.set_device_state(device_id, {"wave_state": target_value})
             _LOGGER.debug("Set bubbles to %s (wave_state=%d)", level.name, target_value)
+
+    async def airjet_v02_spa_set_bubbles(
+        self, device_id: str, level: BubblesLevel
+    ) -> None:
+        """Set bubbles level for binary V02 AirJet / UltraFit spa."""
+
+        value_map = {
+            BubblesLevel.OFF: 0,
+            BubblesLevel.MEDIUM: 1,
+            BubblesLevel.MAX: 1,
+        }
+
+        target_value = value_map.get(level)
+
+        if target_value is not None:
+            await self.set_device_state(device_id, {"wave_state": target_value})
+            _LOGGER.debug("Set V02 binary bubbles to %s (wave_state=%d)", level.name, target_value)
 
     async def hydrojet_spa_set_bubbles(
         self, device_id: str, level: BubblesLevel

@@ -15,6 +15,7 @@ from .aws_iot.api import AwsIotApi
 from .bestway.api import BestwayApi
 from .bestway.model import (
     AIRJET_V01_BUBBLES_MAP,
+    AIRJET_V02_BINARY_BUBBLES_MAP,
     HYDROJET_BUBBLES_MAP,
     BestwayDeviceType,
     BubblesLevel,
@@ -48,6 +49,20 @@ _AIRJET_V01_BUBBLES_SELECT_DESCRIPTION = BubblesSelectEntityDescription(
     get_fn=lambda api_value: AIRJET_V01_BUBBLES_MAP.from_api_value(api_value),
 )
 
+_AIRJET_V02_BINARY_BUBBLES_SELECT_DESCRIPTION = BubblesSelectEntityDescription(
+    key="bubbles",
+    options=[
+        _BUBBLES_OPTIONS[BubblesLevel.OFF],
+        _BUBBLES_OPTIONS[BubblesLevel.MAX],
+    ],
+    icon=Icon.BUBBLES,
+    name="Spa Bubbles",
+    set_fn=lambda api, device_id, level: api.airjet_v02_spa_set_bubbles(
+        device_id, level
+    ),
+    get_fn=lambda api_value: AIRJET_V02_BINARY_BUBBLES_MAP.from_api_value(api_value),
+)
+
 _HYDROJET_BUBBLES_SELECT_DESCRIPTION = BubblesSelectEntityDescription(
     key="bubbles",
     options=list(_BUBBLES_OPTIONS.values()),
@@ -68,8 +83,17 @@ async def async_setup_entry(
     entities: list[BestwayEntity] = []
 
     for device_id, device in coordinator.api.devices.items():
+        if device.device_type == BestwayDeviceType.AIRJET_V01_SPA:
+            entities.append(
+                ThreeWaySpaBubblesSelect(
+                    coordinator,
+                    config_entry,
+                    device_id,
+                    _AIRJET_V01_BUBBLES_SELECT_DESCRIPTION,
+                )
+            )
+
         if device.device_type in [
-            BestwayDeviceType.AIRJET_V01_SPA,
             BestwayDeviceType.AIRJET_V02,
             BestwayDeviceType.ULTRAFIT_AIRJET_V02,
         ]:
@@ -78,7 +102,7 @@ async def async_setup_entry(
                     coordinator,
                     config_entry,
                     device_id,
-                    _AIRJET_V01_BUBBLES_SELECT_DESCRIPTION,
+                    _AIRJET_V02_BINARY_BUBBLES_SELECT_DESCRIPTION,
                 )
             )
 

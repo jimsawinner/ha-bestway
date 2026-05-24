@@ -151,7 +151,21 @@ class BubblesMapping:
 
 
 BV = BubblesValues
-AIRJET_V01_BUBBLES_MAP = BubblesMapping(BV(0), BV(50, [40, 41, 50, 51]), BV(100))
+
+AIRJET_V01_BUBBLES_MAP = BubblesMapping(
+    BV(0),
+    BV(50, [40, 41, 50, 51]),
+    BV(100),
+)
+
+# V02 AirJet / UltraFit pumps appear to use binary wave values:
+# 0 = off, 1 = on.
+AIRJET_V02_BINARY_BUBBLES_MAP = BubblesMapping(
+    BV(0),
+    BV(-1, []),
+    BV(1),
+)
+
 HYDROJET_BUBBLES_MAP = BubblesMapping(BV(0), BV(40), BV(100))
 
 
