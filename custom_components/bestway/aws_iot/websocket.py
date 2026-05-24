@@ -282,8 +282,17 @@ class AwsIotWebSocket:
                 break
             except Exception as err:
                 _LOGGER.warning(
-                    "Heartbeat failed for device %s: %s", self._device_id[:12], err
+                    "Heartbeat failed for device %s: %s",
+                    self._device_id[:12],
+                    err,
                 )
+
+                if self._disconnect_callback is not None:
+                    self._disconnect_callback()
+
+                if self._running:
+                    await self._schedule_reconnect()
+
                 break
 
     async def _schedule_reconnect(self) -> None:

@@ -62,8 +62,10 @@ class BestwayUpdateCoordinator(DataUpdateCoordinator[BestwayApiResults]):
             device_id: Device ID (DID) that was updated
             attrs: Device attributes from WebSocket s2c_noti message
         """
-        _LOGGER.debug(
-            "WebSocket update for device %s with %d attributes", device_id, len(attrs)
+        _LOGGER.warning(
+            "Bestway WebSocket update for device %s: %s",
+            device_id,
+            attrs,
         )
 
         # Merge WebSocket updates with existing state to preserve diagnostic fields
@@ -103,5 +105,5 @@ class BestwayUpdateCoordinator(DataUpdateCoordinator[BestwayApiResults]):
         real-time updates. Polling continues as a safety net to catch any
         missed updates or handle WebSocket connection issues.
         """
-        _LOGGER.info("WebSocket active, reducing polling to 5-minute intervals")
-        self.update_interval = timedelta(seconds=300)
+        _LOGGER.info("WebSocket active, keeping 30-second safety polling")
+        self.update_interval = timedelta(seconds=30)
