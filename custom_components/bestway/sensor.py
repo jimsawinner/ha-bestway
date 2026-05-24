@@ -311,16 +311,16 @@ class StateSensor(BestwayEntity, SensorEntity):
 
 
 class EstimatedPowerSensor(BestwayEntity, SensorEntity):
-    """Estimated instantaneous power consumption for a spa.
+    """Estimated instantaneous power consumption for a spa."""
 
-    This is not measured power. It is a best-effort estimate based on
-    reported spa state.
-    """
-
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:flash"
+    entity_description = SensorEntityDescription(
+        key="estimated_power",
+        name="Estimated Power",
+        native_unit_of_measurement=UnitOfPower.WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:flash",
+    )
 
     def __init__(
         self,
@@ -357,10 +357,14 @@ class EstimatedPowerSensor(BestwayEntity, SensorEntity):
 class EstimatedEnergySensor(BestwayEntity, RestoreEntity, SensorEntity):
     """Estimated cumulative energy consumption for a spa."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_icon = "mdi:counter"
+    entity_description = SensorEntityDescription(
+        key="estimated_energy",
+        name="Estimated Energy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:counter",
+    )
 
     def __init__(
         self,
