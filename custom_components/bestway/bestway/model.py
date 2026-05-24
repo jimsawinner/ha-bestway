@@ -88,9 +88,9 @@ class HydrojetHeat(IntEnum):
 class BubblesLevel(Enum):
     """Bubbles levels available to a range of spa models."""
 
-    OFF = auto()
-    MEDIUM = auto()
-    MAX = auto()
+    OFF = 0
+    MEDIUM = 2
+    MAX = 1
 
 
 class BubblesValues:
