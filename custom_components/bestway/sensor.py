@@ -38,6 +38,12 @@ ESTIMATED_JETS_WATTS = 0  # set later if you want Hydrojet jet estimate
 
 
 @dataclass
+class DeviceSensorDescription:
+    """An entity description with a function that describes how to derive a value."""
+
+    entity_description: SensorEntityDescription
+    value_fn: Callable[[BestwayDevice], StateType]
+
 def estimate_power_w(status_attrs: dict) -> int:
     """Estimate current power draw in watts from Bestway status attrs."""
 
@@ -104,13 +110,6 @@ def estimate_power_w(status_attrs: dict) -> int:
         power += 1200
 
     return power
-
-class DeviceSensorDescription:
-    """An entity description with a function that describes how to derive a value."""
-
-    entity_description: SensorEntityDescription
-    value_fn: Callable[[BestwayDevice], StateType]
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
