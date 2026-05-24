@@ -31,6 +31,10 @@ from .entity import BestwayEntity
 
 from datetime import datetime, timezone
 
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+
 ESTIMATED_HEATER_WATTS = 2050
 ESTIMATED_BUBBLES_WATTS = 800
 ESTIMATED_FILTER_WATTS = 50
@@ -44,73 +48,6 @@ class DeviceSensorDescription:
     entity_description: SensorEntityDescription
     value_fn: Callable[[BestwayDevice], StateType]
 
-def estimate_power_w(status_attrs: dict) -> int:
-    """Estimate current power draw in watts from Bestway status attrs."""
-
-    power = 0
-
-    HEATER_W = 2000
-    FILTER_W = 50
-    BUBBLES_W = 800
-    HYDROJET_W = 1200
-
-    filter_on = any(
-        status_attrs.get(key) in (True, 1, "1", "on", "ON")
-        for key in (
-            "filter",
-            "filter_power",
-            "pump",
-            "pump_power",
-            "filter_state",
-        )
-    )
-
-    heater_on = any(
-        status_attrs.get(key) in (True, 1, "1", "on", "ON")
-        for key in (
-            "heat",
-            "heater",
-            "heat_power",
-            "heater_power",
-            "heating",
-        )
-    )
-
-    bubbles_on = any(
-        status_attrs.get(key) in (True, 1, "1", "on", "ON")
-        for key in (
-            "bubbles",
-            "airjet",
-            "air_bubble",
-            "bubble",
-            "bubble_power",
-        )
-    )
-
-    hydrojet_on = any(
-        status_attrs.get(key) in (True, 1, "1", "on", "ON")
-        for key in (
-            "hydrojet",
-            "jets",
-            "jet",
-            "jet_power",
-        )
-    )
-
-    if filter_on:
-        power += 50
-
-    if heater_on:
-        power += 2000
-
-    if bubbles_on:
-        power += 800
-
-    if hydrojet_on:
-        power += 1200
-
-    return power
-
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -121,6 +58,12 @@ async def async_setup_entry(
     entities: list[BestwayEntity] = []
 
     for device_id, device_info in coordinator.api.devices.items():
+        _LOGGER.warning(
+            "Bestway sensor setup: device_id=%s device_type=%s",
+            device_id,
+            device_info.device_type,
+        )
+
         name_prefix = "Bestway"
         if device_info.device_type in [
             BestwayDeviceType.AIRJET_SPA,
@@ -132,18 +75,21 @@ async def async_setup_entry(
             BestwayDeviceType.HYDROJET_PRO_V02,
         ]:
             name_prefix = "Spa"
-            entities.append(
-                EstimatedPowerSensor(
-                    coordinator,
-                    config_entry,
-                    device_id,
-                    name=f"{name_prefix} Estimated Power",
-                ),
-                EstimatedEnergySensor(
-                    coordinator,
-                    config_entry,
-                    device_id,
-                ),
+            entities.extend(
+                [
+                    EstimatedPowerSensor(
+                        coordinator,
+                        config_entry,
+                        device_id,
+                        name=f"{name_prefix} Estimated Power",
+                    ),
+                    EstimatedEnergySensor(
+                        coordinator,
+                        config_entry,
+                        device_id,
+                        name=f"{name_prefix} Estimated Energy",
+                    ),
+                ]
             )
         elif device_info.device_type == BestwayDeviceType.POOL_FILTER:
             name_prefix = "Pool Filter"
@@ -270,6 +216,48 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
+def calculate_estimated_power_watts(attrs: dict) -> int:
+    """Calculate estimated power draw from Bestway attrs."""
+    watts = 0
+
+    heater_active = False
+
+    if "heat_power" in attrs:
+        heater_active = bool(attrs.get("heat_power")) and not bool(
+            attrs.get("heat_temp_reach")
+        )
+    elif "heat" in attrs:
+        heater_active = (
+            int(attrs.get("heat") or 0) > 0 and int(attrs.get("heat") or 0) != 4
+        )
+
+    if heater_active:
+        watts += ESTIMATED_HEATER_WATTS
+
+    filter_active = False
+
+    if "filter_power" in attrs:
+        filter_active = bool(attrs.get("filter_power"))
+    elif "filter" in attrs:
+        filter_active = int(attrs.get("filter") or 0) == 2
+
+    if filter_active:
+        watts += ESTIMATED_FILTER_WATTS
+
+    bubbles_active = False
+
+    if "wave_power" in attrs:
+        bubbles_active = bool(attrs.get("wave_power"))
+    elif "wave" in attrs:
+        bubbles_active = int(attrs.get("wave") or 0) > 0
+
+    if bubbles_active:
+        watts += ESTIMATED_BUBBLES_WATTS
+
+    if bool(attrs.get("jet")):
+        watts += ESTIMATED_JETS_WATTS
+
+    return watts
 
 class DeviceSensor(BestwayEntity, SensorEntity):
     """A sensor based on device metadata."""
@@ -321,101 +309,6 @@ class StateSensor(BestwayEntity, SensorEntity):
             return self.status.attrs.get(self._state_key)
         return None
 
-    class EstimatedPowerSensor(BestwayEntity, SensorEntity):
-        """Estimated instantaneous spa power draw."""
-
-        entity_description = SensorEntityDescription(
-            key="estimated_power",
-            name="Estimated Power",
-            native_unit_of_measurement=UnitOfPower.WATT,
-            device_class=SensorDeviceClass.POWER,
-            state_class=SensorStateClass.MEASUREMENT,
-            icon="mdi:lightning-bolt",
-        )
-
-        def __init__(
-            self,
-            coordinator: BestwayUpdateCoordinator,
-            config_entry: ConfigEntry,
-            device_id: str,
-        ) -> None:
-            """Initialize estimated power sensor."""
-            super().__init__(coordinator, config_entry, device_id)
-            self._attr_unique_id = f"{device_id}_estimated_power"
-
-        @property
-        def native_value(self) -> int | None:
-            """Return estimated power in watts."""
-            if self.status is None:
-                return None
-
-            return estimate_power_w(self.status.attrs)
-
-    class EstimatedEnergySensor(BestwayEntity, RestoreEntity, SensorEntity):
-        """Estimated cumulative spa energy usage."""
-
-        entity_description = SensorEntityDescription(
-            key="estimated_energy",
-            name="Estimated Energy",
-            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-            device_class=SensorDeviceClass.ENERGY,
-            state_class=SensorStateClass.TOTAL_INCREASING,
-            icon="mdi:counter",
-        )
-
-        def __init__(
-            self,
-            coordinator: BestwayUpdateCoordinator,
-            config_entry: ConfigEntry,
-            device_id: str,
-        ) -> None:
-            """Initialize estimated energy sensor."""
-            super().__init__(coordinator, config_entry, device_id)
-            self._attr_unique_id = f"{device_id}_estimated_energy"
-            self._energy_kwh: float = 0.0
-            self._last_update: datetime | None = None
-
-        async def async_added_to_hass(self) -> None:
-            """Restore previous energy total after Home Assistant restart."""
-            await super().async_added_to_hass()
-
-            last_state = await self.async_get_last_state()
-
-            if (
-                last_state is not None
-                and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
-            ):
-                try:
-                    self._energy_kwh = float(last_state.state)
-                except ValueError:
-                    self._energy_kwh = 0.0
-
-            self._last_update = datetime.now(timezone.utc)
-
-        @property
-        def native_value(self) -> float | None:
-            """Return estimated cumulative energy in kWh."""
-            if self.status is None:
-                return round(self._energy_kwh, 3)
-
-            now = datetime.now(timezone.utc)
-
-            if self._last_update is None:
-                self._last_update = now
-                return round(self._energy_kwh, 3)
-
-            elapsed_hours = (now - self._last_update).total_seconds() / 3600
-
-            # Avoid silly jumps after long downtime/restart/weird coordinator delays.
-            # Tune if needed.
-            if 0 < elapsed_hours < 1:
-                estimated_power_w = estimate_power_w(self.status.attrs)
-                self._energy_kwh += estimated_power_w * elapsed_hours / 1000
-
-            self._last_update = now
-
-            return round(self._energy_kwh, 3)
-
 
 class EstimatedPowerSensor(BestwayEntity, SensorEntity):
     """Estimated instantaneous power consumption for a spa.
@@ -440,6 +333,7 @@ class EstimatedPowerSensor(BestwayEntity, SensorEntity):
         super().__init__(coordinator, config_entry, device_id)
         self._attr_name = name
         self._attr_unique_id = f"{device_id}_estimated_power"
+        self._attr_has_entity_name = True
 
     @property
     def native_value(self) -> int | None:
@@ -447,73 +341,87 @@ class EstimatedPowerSensor(BestwayEntity, SensorEntity):
         if self.status is None:
             return None
 
-        attrs = self.status.attrs
-        watts = 0
-
-        # Heater:
-        #
-        # Old Airjet uses:
-        #   heat_power: bool
-        #   heat_temp_reach: bool
-        #
-        # V01 / V02 normalized devices use:
-        #   heat: 0 off, 1 enabled/starting, 3 heating, 4 target reached
-        #
-        # Existing climate.py treats heat > 0 and heat != 4 as actively heating,
-        # so we mirror that behaviour.
-        heater_active = False
-
-        if "heat_power" in attrs:
-            heater_active = bool(attrs.get("heat_power")) and not bool(
-                attrs.get("heat_temp_reach")
-            )
-        elif "heat" in attrs:
-            heater_active = (
-                int(attrs.get("heat") or 0) > 0 and int(attrs.get("heat") or 0) != 4
-            )
-
-        if heater_active:
-            watts += ESTIMATED_HEATER_WATTS
-
-        # Filter:
-        #
-        # Old Airjet uses filter_power.
-        # V01 / V02 normalized devices use filter == 2 for ON.
-        filter_active = False
-
-        if "filter_power" in attrs:
-            filter_active = bool(attrs.get("filter_power"))
-        elif "filter" in attrs:
-            filter_active = int(attrs.get("filter") or 0) == 2
-
-        if filter_active:
-            watts += ESTIMATED_FILTER_WATTS
-
-        # Bubbles:
-        #
-        # Old Airjet uses wave_power.
-        # V01 / V02 normalized devices use wave > 0.
-        bubbles_active = False
-
-        if "wave_power" in attrs:
-            bubbles_active = bool(attrs.get("wave_power"))
-        elif "wave" in attrs:
-            bubbles_active = int(attrs.get("wave") or 0) > 0
-
-        if bubbles_active:
-            watts += ESTIMATED_BUBBLES_WATTS
-
-        # Hydrojet jets, if you later decide on a wattage.
-        if bool(attrs.get("jet")):
-            watts += ESTIMATED_JETS_WATTS
-
-        return watts
+        return calculate_estimated_power_watts(self.status.attrs)
 
     @property
     def extra_state_attributes(self) -> dict[str, int | str]:
         """Return the assumptions used by this estimated sensor."""
         return {
             "calculation": "estimated",
+            "heater_watts": ESTIMATED_HEATER_WATTS,
+            "bubbles_watts": ESTIMATED_BUBBLES_WATTS,
+            "filter_watts": ESTIMATED_FILTER_WATTS,
+            "jets_watts": ESTIMATED_JETS_WATTS,
+        }
+
+class EstimatedEnergySensor(BestwayEntity, RestoreEntity, SensorEntity):
+    """Estimated cumulative energy consumption for a spa."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:counter"
+
+    def __init__(
+        self,
+        coordinator: BestwayUpdateCoordinator,
+        config_entry: ConfigEntry,
+        device_id: str,
+        name: str,
+    ) -> None:
+        """Initialize the estimated energy sensor."""
+        super().__init__(coordinator, config_entry, device_id)
+        self._attr_name = name
+        self._attr_unique_id = f"{device_id}_estimated_energy"
+        self._attr_has_entity_name = True
+        self._energy_kwh: float = 0.0
+        self._last_update: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous energy total after Home Assistant restart."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+
+        if (
+            last_state is not None
+            and last_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+        ):
+            try:
+                self._energy_kwh = float(last_state.state)
+            except ValueError:
+                self._energy_kwh = 0.0
+
+        self._last_update = datetime.now(timezone.utc)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return estimated cumulative energy in kWh."""
+        if self.status is None:
+            return round(self._energy_kwh, 3)
+
+        now = datetime.now(timezone.utc)
+
+        if self._last_update is None:
+            self._last_update = now
+            return round(self._energy_kwh, 3)
+
+        elapsed_hours = (now - self._last_update).total_seconds() / 3600
+
+        if 0 < elapsed_hours < 1:
+            watts = calculate_estimated_power_watts(self.status.attrs)
+            self._energy_kwh += watts * elapsed_hours / 1000
+
+        self._last_update = now
+
+        return round(self._energy_kwh, 3)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int | str]:
+        """Return the assumptions used by this estimated sensor."""
+        return {
+            "calculation": "estimated",
+            "source": "estimated_power",
             "heater_watts": ESTIMATED_HEATER_WATTS,
             "bubbles_watts": ESTIMATED_BUBBLES_WATTS,
             "filter_watts": ESTIMATED_FILTER_WATTS,
