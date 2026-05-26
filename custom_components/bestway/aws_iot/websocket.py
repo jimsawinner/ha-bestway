@@ -290,35 +290,49 @@ class AwsIotWebSocket:
                 if self._disconnect_callback is not None:
                     self._disconnect_callback()
 
+                # Mark current websocket as dead/stale before reconnect
+                try:
+                    if self._websocket is not None:
+                        await self._websocket.close()
+                except Exception:
+                    pass
+
+                self._websocket = None
+
                 if self._running:
                     await self._schedule_reconnect()
 
                 break
 
     async def _schedule_reconnect(self) -> None:
-        """Schedule reconnection with exponential backoff.
-
-        Delays: 3s → 6s → 12s → 24s → 48s → 60s (max)
-        """
+        """Schedule reconnection with exponential backoff."""
         if not self._running:
             return
 
-        # Get delay based on reconnect count
         delay_index = min(self._reconnect_count, len(RECONNECT_DELAYS) - 1)
         delay = RECONNECT_DELAYS[delay_index]
-
-        _LOGGER.info(
-            "Reconnecting device %s in %ds (attempt %d)",
-            self._device_id[:12],
-            delay,
-            self._reconnect_count + 1,
-        )
-
-        # Increment for next attempt
         self._reconnect_count += 1
 
-        # Wait and reconnect
+        _LOGGER.warning(
+            "Reconnecting Bestway WebSocket for device %s in %s seconds",
+            self._device_id[:12],
+            delay,
+        )
+
         await asyncio.sleep(delay)
 
-        if self._running:
-            await self.connect()
+        if not self._running:
+            return
+
+        try:
+            if self._websocket is not None:
+                await self._websocket.close()
+        except Exception as err:
+            _LOGGER.debug("Error closing stale Bestway websocket: %s", err)
+
+        self._websocket = None
+
+        # Critical bit: allow connect() to run again
+        self._running = False
+
+        await self.connect()
