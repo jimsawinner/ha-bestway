@@ -145,6 +145,8 @@ async def _setup_all_platforms(
 # exactly, asymmetries included.
 _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
     (BestwayDeviceType.AIRJET_SPA, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
         "test_device_protocol_version",
@@ -159,6 +161,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.AIRJET_SPA, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
         "test_device_protocol_version",
@@ -173,6 +177,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.AIRJET_V01_SPA, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -186,6 +192,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.AIRJET_V01_SPA, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -199,6 +207,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.ULTRAFIT_SPA, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -212,6 +222,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.ULTRAFIT_SPA, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -225,6 +237,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.HYDROJET_SPA, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -239,6 +253,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.HYDROJET_SPA, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -253,6 +269,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.HYDROJET_PRO_SPA, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -267,6 +285,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.HYDROJET_PRO_SPA, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_mcu_hard_version",
         "test_device_mcu_soft_version",
@@ -319,6 +339,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_soft_version",
     },
     (BestwayDeviceType.AIRJET_V02, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_ota_status",
         "test_device_spa_connected",
@@ -331,6 +353,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.AIRJET_V02, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_ota_status",
         "test_device_spa_connected",
         "test_device_spa_filter_power",
@@ -343,6 +367,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.ULTRAFIT_AIRJET_V02, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_ota_status",
         "test_device_spa_connected",
@@ -355,6 +381,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.ULTRAFIT_AIRJET_V02, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_ota_status",
         "test_device_spa_connected",
         "test_device_spa_filter_power",
@@ -367,6 +395,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.HYDROJET_V02, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_ota_status",
         "test_device_spa_connected",
@@ -379,6 +409,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.HYDROJET_V02, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_ota_status",
         "test_device_spa_connected",
         "test_device_spa_filter_power",
@@ -391,6 +423,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.HYDROJET_PRO_V02, BUBBLES_MODE_3WAY): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_bubbles",
         "test_device_ota_status",
         "test_device_spa_connected",
@@ -403,6 +437,8 @@ _EXPECTED: dict[tuple[BestwayDeviceType, str], set[str]] = {
         "test_device_wifi_version",
     },
     (BestwayDeviceType.HYDROJET_PRO_V02, BUBBLES_MODE_ONOFF): {
+        "test_device_estimated_energy",
+        "test_device_estimated_power",
         "test_device_ota_status",
         "test_device_spa_connected",
         "test_device_spa_filter_power",

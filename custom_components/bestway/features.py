@@ -74,6 +74,9 @@ class DeviceFeatures:
     filter_change_sensor: bool
     connectivity_sensor: bool
     errors_sensor: bool
+    # Estimated power/energy sensors (energy.py). Spas only: no wattage
+    # figures are known for the pool filter pump.
+    energy_estimate: bool
     name_prefix: str
     version_sensors: VersionSensorSet
 
@@ -92,6 +95,7 @@ _NO_FEATURES = DeviceFeatures(
     filter_change_sensor=False,
     connectivity_sensor=False,
     errors_sensor=False,
+    energy_estimate=False,
     name_prefix="Bestway",
     version_sensors=VersionSensorSet.SHADOW,  # overwritten by features_for()
 )
@@ -113,6 +117,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles=BubblesStyle.SWITCH,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.AIRJET_V01_SPA: replace(
@@ -124,6 +129,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles=BubblesStyle.THREE_WAY,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.ULTRAFIT_SPA: replace(
@@ -136,6 +142,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles_mode_option=False,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.HYDROJET_SPA: replace(
@@ -148,6 +155,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles=BubblesStyle.THREE_WAY,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.HYDROJET_PRO_SPA: replace(
@@ -160,6 +168,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles=BubblesStyle.THREE_WAY,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.AIRJET_V02: replace(
@@ -174,6 +183,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles_onoff=BubblesStyle.SWITCH,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.ULTRAFIT_AIRJET_V02: replace(
@@ -188,6 +198,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles_onoff=BubblesStyle.SWITCH,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.HYDROJET_V02: replace(
@@ -205,6 +216,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles_onoff=BubblesStyle.SWITCH,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.HYDROJET_PRO_V02: replace(
@@ -220,6 +232,7 @@ _FEATURES_BY_TYPE: dict[BestwayDeviceType, DeviceFeatures] = {
         bubbles_onoff=BubblesStyle.SWITCH,
         connectivity_sensor=True,
         errors_sensor=True,
+        energy_estimate=True,
         name_prefix="Spa",
     ),
     BestwayDeviceType.POOL_FILTER: replace(

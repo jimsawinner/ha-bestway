@@ -51,6 +51,12 @@ All devices in your account will be automatically detected and added by the inte
 
 **Region selection:** Users have reported that the actual region for accounts is not necessarily as expected. If your first guess doesn't work (either failing to log in, or no devices found), try another region.
 
+## Estimated Energy
+
+Spas don't report their electricity use, so each spa gets two estimated sensors: **Estimated Power** (W) and **Estimated Energy** (kWh). They assume a fixed draw for each running component - heater 2050 W while actively heating, bubbles 800 W, filter pump 50 W - and add these up over time. The heater is only counted while it is heating, not once the water has reached its target temperature.
+
+Estimated Energy can be added to the Home Assistant energy dashboard as an individual device. Treat it as a guide to running costs rather than a meter reading: actual draw varies by model, and the sensors' attributes show the wattages being assumed.
+
 ## Contributing
 
 If you want to contribute to this please read the [Contribution Guidelines](CONTRIBUTING.md).
