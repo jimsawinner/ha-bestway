@@ -21,11 +21,15 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import websockets
+from websockets.exceptions import InvalidStatus
 
 from ..translation import v01_attrs_from_shadow
 from ..websocket_base import OPEN_TIMEOUT, BaseWebSocketClient
 
 _LOGGER = logging.getLogger(__name__)
+
+HEARTBEAT_INTERVAL = 30
+PONG_TIMEOUT = 20
 
 # Regional WebSocket endpoints (from official app ServiceConfig.java)
 ENDPOINTS = {
@@ -43,8 +47,8 @@ class AwsIotWebSocket(BaseWebSocketClient):
     """Per-device WebSocket client for AWS IoT shadow updates.
 
     Each device requires its own WebSocket connection to receive real-time
-    state updates from AWS IoT device shadows. Implements automatic
-    reconnection and integrates with coordinator callbacks.
+    state updates from AWS IoT device shadows. Reconnection with
+    exponential backoff is handled by BaseWebSocketClient.run().
     """
 
     def __init__(
@@ -59,7 +63,7 @@ class AwsIotWebSocket(BaseWebSocketClient):
     ) -> None:
         """Initialize the client for one device's shadow subscription.
         update_callback is called with (device_id, normalized_attrs) on each
-        update; disconnect_callback also fires on a failed initial connection
+        update; disconnect_callback also fires on a failed connection
         attempt; token_refresh_callback is used to recover from an HTTP 400.
         """
         super().__init__(disconnect_callback, connect_callback)
@@ -82,113 +86,58 @@ class AwsIotWebSocket(BaseWebSocketClient):
             )
         return endpoint
 
-    async def connect(self) -> None:
-        """Connect to region-specific WebSocket endpoint.
+    @property
+    def _log_name(self) -> str:
+        return f"WebSocket for device {self._device_id}"
 
-        Establishes connection to AWS API Gateway with Authorization header
-        and starts background tasks for heartbeat and message listening.
+    async def _open(self) -> None:
+        """Connect to the region-specific endpoint.
+
+        API Gateway authenticates the Authorization header during the
+        opening handshake, so there is no login message. An expired token
+        is rejected with HTTP 400; that is retried once immediately with a
+        fresh token rather than waiting out a backoff delay.
         """
-        if self._running:
-            _LOGGER.warning("WebSocket already running for device %s", self._device_id)
-            return
+        try:
+            self._websocket = await self._connect_socket()
+        except InvalidStatus as err:
+            if err.response.status_code != 400 or self._token_refresh_callback is None:
+                raise
+            _LOGGER.info(
+                "Token rejected for device %s (HTTP 400), refreshing",
+                self._device_id,
+            )
+            self._token = await self._token_refresh_callback()
+            self._websocket = await self._connect_socket()
 
+    async def _connect_socket(self) -> Any:
         _LOGGER.info(
             "Connecting WebSocket for device %s (region: %s)",
             self._device_id,
             self._service_region,
         )
+        from homeassistant.util import ssl as ssl_util
 
-        try:
-            # Use Home Assistant's SSL context
-            from homeassistant.util import ssl as ssl_util
-
-            ssl_context = ssl_util.get_default_context()
-
-            # Connect with Authorization header (no login message needed)
-            self._websocket = await websockets.connect(
-                self.ws_url,
-                additional_headers={"Authorization": self._token},
-                ssl=ssl_context,
-                ping_interval=None,  # Manual heartbeat
-                open_timeout=OPEN_TIMEOUT,
-            )
-
-            self._running = True
-            self._reconnect_count = 0  # Reset on successful connection
-
-            _LOGGER.info("WebSocket connected for device %s", self._device_id)
-            self._notify_connected()
-
-            # Start background tasks
-            self._listen_task = asyncio.create_task(self._listen_loop())
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-        except Exception as err:
-            error_msg = str(err)
-            _LOGGER.error(
-                "WebSocket connection failed for device %s: %s",
-                self._device_id,
-                error_msg,
-            )
-
-            # Handle HTTP 400 (token expired) - trigger refresh and immediate retry
-            if "HTTP 400" in error_msg and self._token_refresh_callback is not None:
-                _LOGGER.info("HTTP 400 detected - attempting token refresh")
-                try:
-                    new_token = await self._token_refresh_callback()
-                    if new_token:
-                        self._token = new_token
-                        _LOGGER.info("Token refreshed, immediate retry")
-                        # Immediate retry (don't increment reconnect count)
-                        await self.connect()
-                        return
-                except Exception as refresh_err:
-                    _LOGGER.error("Token refresh failed: %s", str(refresh_err))
-
-            # Schedule reconnection with backoff
-            if not isinstance(err, asyncio.CancelledError):
-                self._notify_disconnected()
-                await self._schedule_reconnect()
-
-    async def disconnect(self) -> None:
-        """Disconnect and cleanup resources.
-
-        Cancels background tasks and closes WebSocket connection gracefully.
-        Safe to call multiple times.
-        """
-        _LOGGER.info("Disconnecting WebSocket for device %s", self._device_id)
-        self._running = False
-        await self._cancel_and_close()
-        _LOGGER.info("WebSocket disconnected for device %s", self._device_id)
+        return await websockets.connect(
+            self.ws_url,
+            additional_headers={"Authorization": self._token},
+            ssl=ssl_util.get_default_context(),
+            ping_interval=None,  # Manual heartbeat
+            open_timeout=OPEN_TIMEOUT,
+        )
 
     async def _listen_loop(self) -> None:
-        """Listen for incoming shadow update messages.
-
-        Processes device shadow deltas and triggers coordinator callback
-        with normalized attributes.
-        """
-        try:
-            if self._websocket is None:
-                return
-
-            async for message in self._websocket:
-                try:
-                    data = json.loads(message)
-                    await self._handle_message(data)
-
-                except json.JSONDecodeError:
-                    _LOGGER.warning("Received malformed JSON message")
-
-        except websockets.exceptions.ConnectionClosed:
-            _LOGGER.warning("WebSocket closed for device %s", self._device_id)
-            # Trigger reconnection
-            if self._running:
-                await self._schedule_reconnect()
-
-        except Exception as err:
-            _LOGGER.error("Listen loop error for device %s: %s", self._device_id, err)
-            if self._running:
-                await self._schedule_reconnect()
+        """Process shadow update messages until the connection closes."""
+        async for message in self._websocket:
+            try:
+                data = json.loads(message)
+            except json.JSONDecodeError:
+                _LOGGER.warning("Received malformed JSON message")
+                continue
+            try:
+                await self._handle_message(data)
+            except Exception as ex:
+                _LOGGER.error("Error processing WebSocket message: %s", ex)
 
     async def _handle_message(self, data: dict[str, Any]) -> None:
         """Process shadow update message.
@@ -240,58 +189,27 @@ class AwsIotWebSocket(BaseWebSocketClient):
                 _LOGGER.error("Callback error: %s", err)
 
     async def _heartbeat_loop(self) -> None:
-        """Send heartbeat every 30 seconds to maintain connection."""
-        while self._running:
-            try:
-                await asyncio.sleep(30)
+        """Send a heartbeat every 30 seconds and check the connection answers.
 
-                if self._running and self._websocket:
-                    # Send application-level heartbeat (JSON message)
-                    message = {
-                        "action": "heartbeat",
-                        "req_event": "heartbeat_req",
-                        "seq_id": self._seq_id,
-                        "req_count": 1,
-                        "req": None,
-                    }
-                    await self._websocket.send(json.dumps(message))
-
-                    # Also send WebSocket protocol ping
-                    await self._websocket.ping()
-
-                    self._seq_id += 1
-                    _LOGGER.debug("Heartbeat sent for device %s", self._device_id)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as err:
-                _LOGGER.warning(
-                    "Heartbeat failed for device %s: %s", self._device_id, err
-                )
-                break
-
-    async def _schedule_reconnect(self) -> None:
-        """Schedule reconnection with exponential backoff.
-
-        Delays: 3s → 6s → 12s → 24s → 48s → 60s (max)
+        API Gateway drops connections idle for 10 minutes, so the JSON
+        heartbeat keeps it open. The protocol ping catches a half-open
+        connection (e.g. after a NAT timeout or network change) that would
+        otherwise never deliver another message nor raise an error; a
+        missing pong raises TimeoutError, ending the connection.
         """
-        if not self._running:
-            return
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            message = {
+                "action": "heartbeat",
+                "req_event": "heartbeat_req",
+                "seq_id": self._seq_id,
+                "req_count": 1,
+                "req": None,
+            }
+            await self._websocket.send(json.dumps(message))
+            self._seq_id += 1
 
-        delay = self._next_reconnect_delay()
-
-        _LOGGER.info(
-            "Reconnecting device %s in %ds (attempt %d)",
-            self._device_id,
-            delay,
-            self._reconnect_count + 1,
-        )
-
-        # Increment for next attempt
-        self._reconnect_count += 1
-
-        # Wait and reconnect
-        await asyncio.sleep(delay)
-
-        if self._running:
-            await self.connect()
+            pong_waiter = await self._websocket.ping()
+            async with asyncio.timeout(PONG_TIMEOUT):
+                await pong_waiter
+            _LOGGER.debug("Heartbeat acknowledged for device %s", self._device_id)

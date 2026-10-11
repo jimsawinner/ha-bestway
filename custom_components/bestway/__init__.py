@@ -198,7 +198,7 @@ async def _async_setup_gizwits(
                 # the device is unreachable) cannot block startup. It is
                 # cancelled automatically when the config entry unloads.
                 entry.async_create_background_task(
-                    hass, ws_client.connect(), name=f"{DOMAIN}-websocket"
+                    hass, ws_client.run(), name=f"{DOMAIN}-websocket"
                 )
 
                 _LOGGER.info("WebSocket client initialized")
@@ -301,7 +301,7 @@ async def _async_setup_aws_iot(
                 # the device is unreachable) cannot block startup. It is
                 # cancelled automatically when the config entry unloads.
                 entry.async_create_background_task(
-                    hass, ws.connect(), name=f"{DOMAIN}-websocket-{device_id}"
+                    hass, ws.run(), name=f"{DOMAIN}-websocket-{device_id}"
                 )
                 websockets.append(ws)
 

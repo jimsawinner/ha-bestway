@@ -23,8 +23,8 @@ class GizwitsWebSocket(BaseWebSocketClient):
     """Gizwits WebSocket client for real-time device updates.
 
     Connects to Gizwits IoT platform WebSocket API to receive real-time
-    device status updates via push notifications. Implements automatic
-    reconnection with exponential backoff and graceful error handling.
+    device status updates via push notifications. Reconnection with
+    exponential backoff is handled by BaseWebSocketClient.run().
 
     The WebSocket URL and port are extracted from the device bindings API
     response, allowing regional endpoint support without hardcoding.
@@ -43,93 +43,51 @@ class GizwitsWebSocket(BaseWebSocketClient):
         """Initialize the client. ws_host/ws_port come from the device
         bindings response; update_callback is called with (device_id, attrs)
         on each device update; disconnect_callback also fires on a failed
-        initial connection attempt.
+        connection attempt.
         """
         super().__init__(disconnect_callback, connect_callback)
         self._uid = uid
         self._token = token
         self._ws_url = f"wss://{ws_host}:{ws_port}/ws/app/v1"
         self._update_callback = update_callback
-        self._authenticated = False
 
-    async def connect(self) -> None:
-        """Connect to the Gizwits WebSocket API, log in, and start listening
-        for device updates. Raises GizwitsWebSocketException if the
-        connection or login fails.
+    @property
+    def _log_name(self) -> str:
+        return "Gizwits WebSocket"
+
+    async def _open(self) -> None:
+        """Connect to the Gizwits WebSocket API and log in. Raises
+        GizwitsWebSocketException if the server rejects the login.
         """
-        if self._running:
-            _LOGGER.warning("WebSocket already running")
-            return
+        # Use Home Assistant's pre-cached SSL context (avoids blocking warnings)
+        # Import here to avoid circular dependency
+        from homeassistant.util import ssl as ssl_util
 
-        _LOGGER.info("Connecting to Gizwits WebSocket: %s", self._ws_url)
+        ssl_context = ssl_util.get_default_context()
 
-        try:
-            # Use Home Assistant's pre-cached SSL context (avoids blocking warnings)
-            # Import here to avoid circular dependency
-            from homeassistant.util import ssl as ssl_util
+        # The library's own ping/pong (ping_interval/ping_timeout) closes the
+        # socket if the server stops answering, which ends the listen loop.
+        self._websocket = await websockets.connect(
+            self._ws_url,
+            ssl=ssl_context,
+            ping_interval=30,
+            ping_timeout=10,
+            open_timeout=OPEN_TIMEOUT,
+        )
 
-            ssl_context = ssl_util.get_default_context()
+        _LOGGER.debug("WebSocket connected, sending login")
+        await self._send_login()
 
-            # Connect with SSL (Gizwits requires secure connection)
-            self._websocket = await websockets.connect(
-                self._ws_url,
-                ssl=ssl_context,
-                ping_interval=30,  # Keep connection alive
-                ping_timeout=10,
-                open_timeout=OPEN_TIMEOUT,
+        response = await asyncio.wait_for(self._websocket.recv(), timeout=10)
+        data = json.loads(response)
+        if data.get("cmd") != "login_res":
+            raise GizwitsWebSocketException(
+                f"Expected login_res, got: {data.get('cmd')}"
             )
 
-            _LOGGER.debug("WebSocket connected, sending login")
-
-            # Send login message
-            await self._send_login()
-
-            # Wait for login response with timeout
-            if self._websocket is not None:
-                response = await asyncio.wait_for(self._websocket.recv(), timeout=10)
-            else:
-                raise GizwitsWebSocketException("WebSocket not connected")
-
-            data = json.loads(response)
-            if data.get("cmd") != "login_res":
-                raise GizwitsWebSocketException(
-                    f"Expected login_res, got: {data.get('cmd')}"
-                )
-
-            if not data.get("data", {}).get("success"):
-                error_msg = data.get("data", {}).get("msg", "Unknown error")
-                raise GizwitsWebSocketException(f"Login failed: {error_msg}")
-
-            self._authenticated = True
-            self._running = True
-            self._reconnect_count = 0  # Reset on successful connection
-
-            _LOGGER.info("WebSocket authenticated successfully")
-            self._notify_connected()
-
-            # Start listening for messages and heartbeat
-            self._listen_task = asyncio.create_task(self._listen_loop())
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-        except Exception as ex:
-            _LOGGER.error("Failed to connect to WebSocket: %s", ex)
-            await self.disconnect()
-
-            # Schedule reconnection if still intended to be running
-            if not isinstance(ex, asyncio.CancelledError):
-                self._notify_disconnected()
-                await self._schedule_reconnect()
-
-    async def disconnect(self) -> None:
-        """Disconnect from WebSocket and cleanup resources.
-
-        Cancels background tasks and closes the WebSocket connection gracefully.
-        Safe to call multiple times.
-        """
-        _LOGGER.debug("Disconnecting WebSocket")
-        self._running = False
-        self._authenticated = False
-        await self._cancel_and_close()
+        if not data.get("data", {}).get("success"):
+            error_msg = data.get("data", {}).get("msg", "Unknown error")
+            raise GizwitsWebSocketException(f"Login failed: {error_msg}")
 
     async def _send_login(self) -> None:
         """Send login message to authenticate WebSocket connection.
@@ -154,86 +112,53 @@ class GizwitsWebSocket(BaseWebSocketClient):
             _LOGGER.debug("Login message sent")
 
     async def _heartbeat_loop(self) -> None:
-        """Send application-level heartbeat to keep connection alive.
+        """Send the application-level heartbeat Gizwits requires.
 
-        Gizwits requires explicit ping/pong messages every 180 seconds
-        to maintain the connection. This is separate from WebSocket
-        protocol-level ping/pong frames.
+        Gizwits expects an explicit {"cmd": "ping"} every 180 seconds,
+        separate from WebSocket protocol-level ping/pong frames. A failed
+        send propagates, ending the connection.
         """
-        while self._running:
-            try:
-                await asyncio.sleep(180)  # Wait 3 minutes
-
-                if self._running and self._websocket is not None:
-                    # Send application-level ping
-                    await self._websocket.send(json.dumps({"cmd": "ping"}))
-                    _LOGGER.debug("Heartbeat ping sent")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as ex:
-                _LOGGER.warning("Heartbeat failed: %s", ex)
-                # Don't break on heartbeat failure - let listen_loop detect connection issues
-                break
+        while True:
+            await asyncio.sleep(180)
+            await self._websocket.send(json.dumps({"cmd": "ping"}))
+            _LOGGER.debug("Heartbeat ping sent")
 
     async def _listen_loop(self) -> None:
-        """Listen for incoming WebSocket messages.
+        """Process incoming messages until the connection closes."""
+        async for message in self._websocket:
+            try:
+                data = json.loads(message)
+                cmd = data.get("cmd")
 
-        Processes device update notifications and handles connection errors
-        with automatic reconnection.
-        """
-        try:
-            if self._websocket is None:
-                return
+                _LOGGER.debug("Received message: cmd=%s", cmd)
 
-            async for message in self._websocket:
-                try:
-                    data = json.loads(message)
-                    cmd = data.get("cmd")
+                if cmd == "s2c_noti":
+                    # Device status update notification
+                    self._handle_device_update(data)
 
-                    _LOGGER.debug("Received message: cmd=%s", cmd)
+                elif cmd == "s2c_online_status":
+                    # Device online/offline notification
+                    device_data = data.get("data", {})
+                    device_id = device_data.get("did")
+                    is_online = device_data.get("is_online")
+                    _LOGGER.info(
+                        "Device %s is now %s",
+                        device_id if device_id else "unknown",
+                        "online" if is_online else "offline",
+                    )
 
-                    if cmd == "s2c_noti":
-                        # Device status update notification
-                        self._handle_device_update(data)
+                elif cmd == "s2c_invalid_msg":
+                    # Invalid message error from server
+                    _LOGGER.warning("Server reported invalid message: %s", redact(data))
 
-                    elif cmd == "s2c_online_status":
-                        # Device online/offline notification
-                        device_data = data.get("data", {})
-                        device_id = device_data.get("did")
-                        is_online = device_data.get("is_online")
-                        _LOGGER.info(
-                            "Device %s is now %s",
-                            device_id if device_id else "unknown",
-                            "online" if is_online else "offline",
-                        )
+                elif cmd == "pong":
+                    # Heartbeat response
+                    _LOGGER.debug("Heartbeat pong received")
 
-                    elif cmd == "s2c_invalid_msg":
-                        # Invalid message error from server
-                        _LOGGER.warning(
-                            "Server reported invalid message: %s", redact(data)
-                        )
-
-                    elif cmd == "pong":
-                        # Heartbeat response
-                        _LOGGER.debug("Heartbeat pong received")
-
-                except json.JSONDecodeError:
-                    _LOGGER.error("Failed to decode WebSocket message")
-                except Exception as ex:
-                    _LOGGER.error("Error processing WebSocket message: %s", ex)
-
-        except websockets.exceptions.ConnectionClosed:
-            _LOGGER.warning("WebSocket connection closed unexpectedly")
-        except asyncio.CancelledError:
-            _LOGGER.debug("WebSocket listen task cancelled")
-        except Exception as ex:
-            _LOGGER.error("WebSocket listen error: %s", ex)
-        finally:
-            if self._running:
-                # Connection lost while we expected it to be running
-                _LOGGER.warning("WebSocket connection lost, will attempt reconnect")
-                await self._handle_disconnect()
+            except json.JSONDecodeError:
+                _LOGGER.error("Failed to decode WebSocket message")
+            except Exception as ex:
+                _LOGGER.error("Error processing WebSocket message: %s", ex)
 
     def _handle_device_update(self, data: dict[str, Any]) -> None:
         """Extract the device ID and attrs from an s2c_noti message and
@@ -258,45 +183,3 @@ class GizwitsWebSocket(BaseWebSocketClient):
             self._update_callback(device_id, attrs)
         except Exception as ex:
             _LOGGER.error("Error in update callback: %s", ex)
-
-    async def _handle_disconnect(self) -> None:
-        """Handle unexpected disconnection.
-
-        Cleans up connection state and schedules reconnection attempt.
-        """
-        self._running = False
-        self._authenticated = False
-
-        self._notify_disconnected()
-
-        # Schedule reconnection
-        await self._schedule_reconnect()
-
-    async def _schedule_reconnect(self) -> None:
-        """Schedule reconnection attempt with exponential backoff.
-
-        Implements exponential backoff strategy:
-        - Attempt 1: 3 seconds
-        - Attempt 2: 6 seconds
-        - Attempt 3: 12 seconds
-        - Attempt 4: 24 seconds
-        - Attempt 5: 48 seconds
-        - Attempt 6+: 60 seconds (maximum delay)
-        """
-        delay = self._next_reconnect_delay()
-        self._reconnect_count += 1
-
-        _LOGGER.info(
-            "Scheduling reconnection in %d seconds (attempt %d)",
-            delay,
-            self._reconnect_count,
-        )
-
-        # Wait for delay, then attempt reconnection
-        await asyncio.sleep(delay)
-        await self.connect()
-
-    @property
-    def is_connected(self) -> bool:
-        """Return True if the connection is active and login succeeded."""
-        return self._running and self._authenticated

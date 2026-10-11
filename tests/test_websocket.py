@@ -9,130 +9,8 @@ import websockets.exceptions
 
 from custom_components.bestway.bestway.websocket import (
     GizwitsWebSocket,
+    GizwitsWebSocketException,
 )
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_success():
-    """Test successful WebSocket connection and authentication."""
-    update_callback = MagicMock()
-    disconnect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid_123",
-        token="test_token_abc",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-        disconnect_callback=disconnect_callback,
-    )
-
-    # Should not be connected initially
-    assert not ws.is_connected
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context") as mock_ssl,
-        patch("asyncio.create_task"),
-    ):
-        mock_ws = MagicMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-        mock_ssl.return_value = MagicMock()
-
-        # Make connect return coroutine
-        async def mock_connect_coro(*args, **kwargs):
-            return mock_ws
-
-        mock_connect.side_effect = mock_connect_coro
-
-        # Mock successful login response
-        mock_ws.recv = AsyncMock(
-            return_value=json.dumps({"cmd": "login_res", "data": {"success": True}})
-        )
-
-        await ws.connect()
-
-        # Verify connection established
-        assert ws._running is True
-        assert ws._authenticated is True
-        assert ws._reconnect_count == 0
-
-        # Verify connection called with correct URL
-        mock_connect.assert_called_once()
-        call_args = mock_connect.call_args[0]
-        assert call_args[0] == "wss://m2m.gizwits.com:8880/ws/app/v1"
-
-        # Verify login message sent
-        mock_ws.send.assert_called_once()
-        login_msg = json.loads(mock_ws.send.call_args[0][0])
-        assert login_msg["cmd"] == "login_req"
-        assert login_msg["data"]["uid"] == "test_uid_123"
-        assert login_msg["data"]["token"] == "test_token_abc"
-        assert login_msg["data"]["auto_subscribe"] is True
-
-        # Verify background tasks created
-        assert ws.is_connected
-
-        # Cleanup
-        ws._running = False
-        await ws.disconnect()
-
-
-@pytest.mark.asyncio
-async def test_websocket_login_failure():
-    """Test authentication failure handling."""
-    update_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="bad_uid",
-        token="bad_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context") as mock_ssl,
-        patch("asyncio.create_task"),
-        # Stop reconnection from actually happening
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
-    ):
-        mock_ws = MagicMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-        mock_ssl.return_value = MagicMock()
-
-        async def mock_connect_coro(*args, **kwargs):
-            return mock_ws
-
-        mock_connect.side_effect = mock_connect_coro
-
-        # Mock failed login response
-        mock_ws.recv = AsyncMock(
-            return_value=json.dumps(
-                {
-                    "cmd": "login_res",
-                    "data": {
-                        "success": False,
-                        "msg": "Invalid credentials",
-                    },
-                }
-            )
-        )
-
-        await ws.connect()
-
-        # Should not be authenticated
-        assert not ws.is_connected
-        assert not ws._authenticated
-        # Should have attempted to schedule reconnection
-        ws._schedule_reconnect.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -245,160 +123,6 @@ async def test_websocket_callback_exception_handling():
 
 
 @pytest.mark.asyncio
-async def test_websocket_disconnect():
-    """Test graceful disconnection."""
-    update_callback = MagicMock()
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch("asyncio.create_task"),
-    ):
-        mock_ws = MagicMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-
-        async def mock_connect_coro(*args, **kwargs):
-            return mock_ws
-
-        mock_connect.side_effect = mock_connect_coro
-
-        # Mock successful login
-        mock_ws.recv = AsyncMock(
-            return_value=json.dumps({"cmd": "login_res", "data": {"success": True}})
-        )
-
-        await ws.connect()
-
-        # Verify connected
-        assert ws.is_connected
-
-        # Disconnect
-        await ws.disconnect()
-
-        # Verify disconnected
-        assert not ws.is_connected
-        mock_ws.close.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_websocket_already_running():
-    """Test connect() when WebSocket already running."""
-    update_callback = MagicMock()
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch("asyncio.create_task"),
-    ):
-        mock_ws = MagicMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-
-        async def mock_connect_coro(*args, **kwargs):
-            return mock_ws
-
-        mock_connect.side_effect = mock_connect_coro
-
-        mock_ws.recv = AsyncMock(
-            return_value=json.dumps({"cmd": "login_res", "data": {"success": True}})
-        )
-
-        await ws.connect()
-
-        # Try to connect again
-        await ws.connect()
-
-        # Should only connect once (second call exits early)
-        assert mock_connect.call_count == 1
-
-        ws._running = False
-        await ws.disconnect()
-
-
-@pytest.mark.asyncio
-async def test_websocket_connection_error():
-    """Test connection failure handling."""
-    update_callback = MagicMock()
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        # Stop reconnection from actually happening
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
-    ):
-        # Simulate connection error
-        async def mock_connect_error(*args, **kwargs):
-            raise ConnectionError("Connection refused")
-
-        mock_connect.side_effect = mock_connect_error
-
-        # Attempt connection (should not raise, should schedule reconnect)
-        await ws.connect()
-
-        # Should not be connected
-        assert not ws.is_connected
-        # Should have called _schedule_reconnect
-        ws._schedule_reconnect.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_websocket_disconnect_callback():
-    """Test disconnect callback is invoked on connection loss."""
-    update_callback = MagicMock()
-    disconnect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-        disconnect_callback=disconnect_callback,
-    )
-
-    # Test _handle_disconnect directly, stop reconnection
-    with patch.object(ws, "_schedule_reconnect", new=AsyncMock()):
-        await ws._handle_disconnect()
-
-        # Verify disconnect callback invoked
-        disconnect_callback.assert_called_once()
-
-        # Verify state cleaned up
-        assert not ws._running
-        assert not ws._authenticated
-        # Should have called _schedule_reconnect
-        ws._schedule_reconnect.assert_called_once()
-
-
-@pytest.mark.asyncio
 async def test_heartbeat_loop_sends_ping():
     """Test heartbeat loop sends ping messages."""
     update_callback = MagicMock()
@@ -413,7 +137,6 @@ async def test_heartbeat_loop_sends_ping():
     mock_ws = MagicMock()
     mock_ws.send = AsyncMock()
     ws._websocket = mock_ws
-    ws._running = True
 
     # Test heartbeat sends ping
     with patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
@@ -453,7 +176,6 @@ async def test_listen_loop_processes_messages():
     # Mock WebSocket with messages
     mock_ws = MagicMock()
     ws._websocket = mock_ws
-    ws._running = False  # Set to False to prevent _handle_disconnect in finally
 
     # Create async iterator that yields messages then stops
     messages = [
@@ -482,42 +204,6 @@ async def test_listen_loop_processes_messages():
 
 
 @pytest.mark.asyncio
-async def test_schedule_reconnect_exponential_backoff():
-    """Test exponential backoff reconnection delays."""
-    update_callback = MagicMock()
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    # Mock sleep and connect to prevent actual delays/connections
-    with (
-        patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
-        patch.object(ws, "connect", new=AsyncMock()),
-    ):
-        # Test first reconnection (3 seconds)
-        ws._reconnect_count = 0
-        await ws._schedule_reconnect()
-        mock_sleep.assert_called_with(3)
-        assert ws._reconnect_count == 1
-
-        # Test second reconnection (6 seconds)
-        mock_sleep.reset_mock()
-        await ws._schedule_reconnect()
-        mock_sleep.assert_called_with(6)
-        assert ws._reconnect_count == 2
-
-        # Test max delay (60 seconds)
-        ws._reconnect_count = 10  # Way beyond array
-        mock_sleep.reset_mock()
-        await ws._schedule_reconnect()
-        mock_sleep.assert_called_with(60)  # Should use max delay
-
-
-@pytest.mark.asyncio
 async def test_listen_loop_handles_json_decode_error():
     """Test listen loop handles malformed JSON gracefully."""
     update_callback = MagicMock()
@@ -531,7 +217,6 @@ async def test_listen_loop_handles_json_decode_error():
 
     mock_ws = MagicMock()
     ws._websocket = mock_ws
-    ws._running = False  # Prevent _handle_disconnect in finally
 
     # Send malformed JSON
     async def mock_async_iter():
@@ -546,221 +231,123 @@ async def test_listen_loop_handles_json_decode_error():
     update_callback.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_listen_loop_handles_connection_closed():
-    """Test listen loop handles ConnectionClosed exception."""
-    update_callback = MagicMock()
-    disconnect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
+def _gizwits_ws(**kwargs):
+    return GizwitsWebSocket(
         uid="test_uid",
         token="test_token",
         ws_host="m2m.gizwits.com",
         ws_port=8880,
-        update_callback=update_callback,
-        disconnect_callback=disconnect_callback,
+        update_callback=kwargs.pop("update_callback", MagicMock()),
+        **kwargs,
     )
 
+
+def _mock_socket(login_response, messages=()):
+    """A socket that answers the login, yields `messages`, then drops."""
     mock_ws = MagicMock()
-    ws._websocket = mock_ws
-    ws._running = True
+    mock_ws.send = AsyncMock()
+    mock_ws.close = AsyncMock()
+    mock_ws.recv = AsyncMock(return_value=json.dumps(login_response))
 
-    # Simulate ConnectionClosed exception
-    async def mock_async_iter():
-        if False:
-            yield
-        raise websockets.exceptions.ConnectionClosed(None, None)
+    async def drop_after_messages():
+        for message in messages:
+            yield message
+        raise websockets.exceptions.ConnectionClosedError(None, None)
 
-    mock_ws.__aiter__ = lambda self: mock_async_iter()
+    mock_ws.__aiter__ = lambda self: drop_after_messages()
+    return mock_ws
 
-    # Mock _handle_disconnect to prevent reconnection
-    with patch.object(ws, "_handle_disconnect", new=AsyncMock()):
-        await ws._listen_loop()
 
-        # Should have called _handle_disconnect
-        ws._handle_disconnect.assert_called_once()
+LOGIN_OK = {"cmd": "login_res", "data": {"success": True}}
 
 
 @pytest.mark.asyncio
-async def test_websocket_connect_callback_invoked_on_success():
-    """connect_callback fires once authentication succeeds."""
+async def test_open_connects_and_logs_in():
+    """_open() connects to the bindings-derived URL and sends login_req."""
+    ws = _gizwits_ws()
+    mock_ws = _mock_socket(LOGIN_OK)
+
+    with (
+        patch(
+            "custom_components.bestway.bestway.websocket.websockets.connect",
+            new=AsyncMock(return_value=mock_ws),
+        ) as mock_connect,
+        patch("homeassistant.util.ssl.get_default_context"),
+    ):
+        await ws._open()
+
+    assert mock_connect.call_args.args[0] == "wss://m2m.gizwits.com:8880/ws/app/v1"
+    # A firewall that silently drops packets must fail fast, not hang on
+    # the OS-level TCP timeout.
+    assert mock_connect.call_args.kwargs.get("open_timeout") is not None
+    login_msg = json.loads(mock_ws.send.call_args.args[0])
+    assert login_msg["cmd"] == "login_req"
+    assert login_msg["data"]["uid"] == "test_uid"
+    assert login_msg["data"]["token"] == "test_token"
+    assert login_msg["data"]["auto_subscribe"] is True
+
+
+@pytest.mark.asyncio
+async def test_open_raises_on_login_failure():
+    """A rejected login is a failed connection attempt."""
+    ws = _gizwits_ws()
+    mock_ws = _mock_socket(
+        {"cmd": "login_res", "data": {"success": False, "msg": "Invalid token"}}
+    )
+
+    with (
+        patch(
+            "custom_components.bestway.bestway.websocket.websockets.connect",
+            new=AsyncMock(return_value=mock_ws),
+        ),
+        patch("homeassistant.util.ssl.get_default_context"),
+        pytest.raises(GizwitsWebSocketException, match="Invalid token"),
+    ):
+        await ws._open()
+
+
+@pytest.mark.asyncio
+async def test_reconnects_through_an_outage():
+    """After a drop, the client keeps retrying until the server is back.
+
+    Regression: reconnects used to run inside the listen task of the dead
+    connection, which then tried to cancel and await itself; the second
+    failed attempt in a row killed the retry chain with a RuntimeError,
+    leaving the integration on 30-second polling until a restart.
+    """
     update_callback = MagicMock()
     connect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid_123",
-        token="test_token_abc",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
+    disconnect_callback = MagicMock()
+    ws = _gizwits_ws(
         update_callback=update_callback,
         connect_callback=connect_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context") as mock_ssl,
-        patch("asyncio.create_task"),
-    ):
-        mock_ws = MagicMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.close = AsyncMock()
-        mock_ssl.return_value = MagicMock()
-
-        async def mock_connect_coro(*args, **kwargs):
-            return mock_ws
-
-        mock_connect.side_effect = mock_connect_coro
-        mock_ws.recv = AsyncMock(
-            return_value=json.dumps({"cmd": "login_res", "data": {"success": True}})
-        )
-
-        await ws.connect()
-
-    connect_callback.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_callback_not_invoked_on_failure():
-    """connect_callback must not fire when the connection fails."""
-    update_callback = MagicMock()
-    connect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-        connect_callback=connect_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
-    ):
-
-        async def mock_connect_error(*args, **kwargs):
-            raise ConnectionRefusedError("Connection refused")
-
-        mock_connect.side_effect = mock_connect_error
-
-        await ws.connect()
-
-    connect_callback.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_websocket_disconnect_callback_fires_on_initial_failure():
-    """disconnect_callback fires on a failed initial connection attempt.
-
-    Regression coverage for #133: before this, an initial connect failure
-    was never reported to the coordinator, so a firewalled install stayed
-    on 5-minute polling with no push updates ever arriving.
-    """
-    update_callback = MagicMock()
-    disconnect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
         disconnect_callback=disconnect_callback,
     )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
-    ):
-
-        async def mock_connect_error(*args, **kwargs):
-            raise ConnectionRefusedError("Connection refused")
-
-        mock_connect.side_effect = mock_connect_error
-
-        await ws.connect()
-
-    disconnect_callback.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_websocket_disconnect_callback_not_repeated_across_retries():
-    """disconnect_callback fires once per disconnected period, not per retry.
-
-    Without de-duplication, a persistently unreachable endpoint would fire
-    the callback (and its log warning) on every backoff attempt.
-    """
-    update_callback = MagicMock()
-    disconnect_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-        disconnect_callback=disconnect_callback,
+    update = json.dumps(
+        {"cmd": "s2c_noti", "data": {"did": "device1", "attrs": {"power": 1}}}
     )
+    # Connect, drop, fail five times, connect again.
+    outcomes = [_mock_socket(LOGIN_OK)]
+    outcomes += [OSError("Network unreachable")] * 5
+    outcomes += [_mock_socket(LOGIN_OK, messages=[update])]
+    reconnected = asyncio.Event()
+    update_callback.side_effect = lambda *_: reconnected.set()
 
     with (
         patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
+            "custom_components.bestway.bestway.websocket.websockets.connect",
+            new=AsyncMock(side_effect=outcomes),
         ) as mock_connect,
         patch("homeassistant.util.ssl.get_default_context"),
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
+        patch("custom_components.bestway.websocket_base.RECONNECT_DELAYS", [0]),
     ):
+        task = asyncio.create_task(ws.run())
+        await asyncio.wait_for(reconnected.wait(), timeout=2)
+        await ws.disconnect()
 
-        async def mock_connect_error(*args, **kwargs):
-            raise ConnectionRefusedError("Connection refused")
-
-        mock_connect.side_effect = mock_connect_error
-
-        await ws.connect()
-        await ws.connect()
-
+    assert task.done()
+    assert mock_connect.call_count == 7
+    update_callback.assert_called_once_with("device1", {"power": 1})
+    assert connect_callback.call_count == 2
+    # Once for the whole outage, not once per failed retry.
     disconnect_callback.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_websocket_open_timeout_passed_to_connect():
-    """websockets.connect must be given an open_timeout.
-
-    Otherwise a firewall that silently drops packets leaves connect()
-    hanging on the OS-level TCP timeout rather than failing fast.
-    """
-    update_callback = MagicMock()
-
-    ws = GizwitsWebSocket(
-        uid="test_uid",
-        token="test_token",
-        ws_host="m2m.gizwits.com",
-        ws_port=8880,
-        update_callback=update_callback,
-    )
-
-    with (
-        patch(
-            "custom_components.bestway.bestway.websocket.websockets.connect"
-        ) as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch.object(ws, "_schedule_reconnect", new=AsyncMock()),
-    ):
-
-        async def mock_connect_error(*args, **kwargs):
-            raise ConnectionRefusedError("Connection refused")
-
-        mock_connect.side_effect = mock_connect_error
-
-        await ws.connect()
-
-    _, kwargs = mock_connect.call_args
-    assert kwargs.get("open_timeout") is not None

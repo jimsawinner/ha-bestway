@@ -5,6 +5,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.http11 import Response
 
 from custom_components.bestway.aws_iot.websocket import AwsIotWebSocket
 
@@ -24,26 +27,6 @@ def aws_websocket(mock_callback):
         token="test_token",
         update_callback=mock_callback,
     )
-
-
-@pytest.mark.asyncio
-async def test_connect_calls_websockets_with_auth_header(aws_websocket):
-    """Test connect uses Authorization header."""
-    with (
-        patch("websockets.connect") as mock_connect,
-        patch("homeassistant.util.ssl.get_default_context"),
-        patch.object(aws_websocket, "_listen_loop", return_value=None),
-        patch.object(aws_websocket, "_heartbeat_loop", return_value=None),
-    ):
-        mock_connect.return_value = AsyncMock()
-
-        await aws_websocket.connect()
-
-        # Verify Authorization header was passed
-        call_kwargs = mock_connect.call_args.kwargs
-        assert "additional_headers" in call_kwargs
-        assert call_kwargs["additional_headers"]["Authorization"] == "test_token"
-        assert aws_websocket._reconnect_count == 0
 
 
 @pytest.mark.asyncio
@@ -151,70 +134,6 @@ async def test_handle_message_desired_overrides_reported(aws_websocket, mock_cal
 
 
 @pytest.mark.asyncio
-async def test_http_400_triggers_token_refresh(aws_websocket):
-    """Test HTTP 400 error triggers token refresh and immediate retry."""
-    token_refresh = AsyncMock(return_value="new_token_789")
-    aws_websocket._token_refresh_callback = token_refresh
-
-    with patch(
-        "custom_components.bestway.aws_iot.websocket.websockets.connect"
-    ) as mock_connect:
-        # First call fails with HTTP 400, second succeeds
-        mock_connect.side_effect = [
-            Exception("HTTP 400 Bad Request"),
-            AsyncMock(),  # Success on second call
-        ]
-
-        await aws_websocket.connect()
-
-        # Verify token refresh was called
-        token_refresh.assert_called_once()
-        assert aws_websocket._token == "new_token_789"
-        # Should have retried (2 connect attempts)
-        assert mock_connect.call_count == 2
-        # Reconnect count should still be 0 (immediate retry, no backoff)
-        assert aws_websocket._reconnect_count == 0
-
-
-@pytest.mark.asyncio
-async def test_disconnect_stops_running(aws_websocket):
-    """Test disconnect stops the running flag and closes WebSocket."""
-    mock_ws = AsyncMock()
-    aws_websocket._websocket = mock_ws
-    aws_websocket._running = True
-    # No tasks to avoid await complexity in tests
-
-    await aws_websocket.disconnect()
-
-    assert aws_websocket._running is False
-    assert mock_ws.close.called
-    assert aws_websocket._websocket is None
-
-
-@pytest.mark.asyncio
-async def test_reconnect_uses_exponential_backoff(aws_websocket):
-    """Test reconnection delay increases with each attempt."""
-    aws_websocket._running = True
-
-    with (
-        patch(
-            "custom_components.bestway.aws_iot.websocket.asyncio.sleep"
-        ) as mock_sleep,
-        patch.object(aws_websocket, "connect", new_callable=AsyncMock),
-    ):
-        # First reconnect (delay = 3s)
-        aws_websocket._reconnect_count = 0
-        await aws_websocket._schedule_reconnect()
-        mock_sleep.assert_called_with(3)
-        assert aws_websocket._reconnect_count == 1
-
-        # Second reconnect (delay = 6s)
-        await aws_websocket._schedule_reconnect()
-        mock_sleep.assert_called_with(6)
-        assert aws_websocket._reconnect_count == 2
-
-
-@pytest.mark.asyncio
 async def test_region_fallback_to_eu(aws_websocket):
     """Test unknown region falls back to EU endpoint."""
     aws_websocket._service_region = "unknown-region-99"
@@ -223,36 +142,6 @@ async def test_region_fallback_to_eu(aws_websocket):
 
     # Should use EU endpoint as fallback
     assert "eu-central-1" in url
-
-
-@pytest.mark.asyncio
-async def test_heartbeat_loop_sends_messages(aws_websocket):
-    """Test heartbeat loop sends JSON heartbeat and WebSocket ping."""
-    mock_ws = MagicMock()
-    mock_ws.send = AsyncMock()
-    mock_ws.ping = AsyncMock()
-
-    aws_websocket._websocket = mock_ws
-    aws_websocket._running = True
-
-    # Mock asyncio.sleep to run one iteration then cancel
-    with patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
-        mock_sleep.side_effect = [None, asyncio.CancelledError()]
-
-        try:
-            await aws_websocket._heartbeat_loop()
-        except asyncio.CancelledError:
-            pass
-
-        # Verify both heartbeat messages sent
-        assert mock_ws.send.called
-        assert mock_ws.ping.called
-
-        # Verify JSON heartbeat format
-        heartbeat_msg = json.loads(mock_ws.send.call_args[0][0])
-        assert heartbeat_msg["action"] == "heartbeat"
-        assert heartbeat_msg["req_event"] == "heartbeat_req"
-        assert "seq_id" in heartbeat_msg
 
 
 @pytest.mark.asyncio
@@ -293,143 +182,170 @@ async def test_listen_loop_processes_shadow_updates(aws_websocket):
         assert updates_received[1] == ("test_device_123", {"heat": 3})
 
 
-@pytest.mark.asyncio
-async def test_connection_closed_triggers_reconnect(aws_websocket):
-    """Test listen loop handles connection closure."""
-    from websockets.exceptions import ConnectionClosed
+def _rejected(status: int) -> InvalidStatus:
+    return InvalidStatus(Response(status, "Rejected", Headers()))
 
-    mock_ws = AsyncMock()
-    mock_ws.__aiter__.return_value = iter([])  # Empty iterator
 
-    aws_websocket._websocket = mock_ws
-    aws_websocket._running = True
+def _dropping_socket(messages=()):
+    """A socket that yields `messages`, then drops."""
+    mock_ws = MagicMock()
+    mock_ws.send = AsyncMock()
+    mock_ws.close = AsyncMock()
 
-    with patch.object(
-        aws_websocket, "_schedule_reconnect", new_callable=AsyncMock
-    ) as mock_reconnect:
-        # Simulate connection closed by raising exception
-        mock_ws.__aiter__.side_effect = ConnectionClosed(None, None)
+    async def drop_after_messages():
+        for message in messages:
+            yield message
+        raise ConnectionClosedError(None, None)
 
-        await aws_websocket._listen_loop()
-
-        # Should have scheduled reconnect
-        mock_reconnect.assert_called_once()
+    mock_ws.__aiter__ = lambda self: drop_after_messages()
+    return mock_ws
 
 
 @pytest.mark.asyncio
-async def test_connect_callback_invoked_on_success(mock_callback):
-    """connect_callback fires once the WebSocket connection is established."""
-    connect_callback = MagicMock()
-    ws = AwsIotWebSocket(
-        device_id="test_device_123",
-        service_region="eu-central-1",
-        token="test_token",
-        update_callback=mock_callback,
-        connect_callback=connect_callback,
-    )
+async def test_open_sends_auth_header(aws_websocket):
+    """_open() authenticates with the token in the Authorization header."""
+    with (
+        patch(
+            "custom_components.bestway.aws_iot.websocket.websockets.connect",
+            new=AsyncMock(),
+        ) as mock_connect,
+        patch("homeassistant.util.ssl.get_default_context"),
+    ):
+        await aws_websocket._open()
 
-    async def mock_connect_coro(*args, **kwargs):
-        return AsyncMock()
+    call_kwargs = mock_connect.call_args.kwargs
+    assert call_kwargs["additional_headers"]["Authorization"] == "test_token"
+    # A firewall that silently drops packets must fail fast, not hang on
+    # the OS-level TCP timeout.
+    assert call_kwargs.get("open_timeout") is not None
+
+
+@pytest.mark.asyncio
+async def test_open_refreshes_token_on_http_400(aws_websocket):
+    """An expired token (HTTP 400) is refreshed and retried immediately."""
+    aws_websocket._token_refresh_callback = AsyncMock(return_value="new_token_789")
 
     with (
         patch(
             "custom_components.bestway.aws_iot.websocket.websockets.connect",
-            side_effect=mock_connect_coro,
+            new=AsyncMock(side_effect=[_rejected(400), MagicMock()]),
+        ) as mock_connect,
+        patch("homeassistant.util.ssl.get_default_context"),
+    ):
+        await aws_websocket._open()
+
+    aws_websocket._token_refresh_callback.assert_awaited_once()
+    assert mock_connect.call_count == 2
+    retry_headers = mock_connect.call_args.kwargs["additional_headers"]
+    assert retry_headers["Authorization"] == "new_token_789"
+
+
+@pytest.mark.asyncio
+async def test_open_does_not_refresh_token_on_other_errors(aws_websocket):
+    """Only HTTP 400 means an expired token; other rejections just fail."""
+    aws_websocket._token_refresh_callback = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.bestway.aws_iot.websocket.websockets.connect",
+            new=AsyncMock(side_effect=_rejected(503)),
         ),
         patch("homeassistant.util.ssl.get_default_context"),
-        patch("custom_components.bestway.aws_iot.websocket.asyncio.create_task"),
+        pytest.raises(InvalidStatus),
     ):
-        await ws.connect()
+        await aws_websocket._open()
 
-    connect_callback.assert_called_once()
-    assert ws._running is True
+    aws_websocket._token_refresh_callback.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_connect_callback_not_invoked_on_failure(mock_callback):
-    """connect_callback must not fire when the connection fails."""
+async def test_heartbeat_sends_json_heartbeat_and_checks_pong(aws_websocket):
+    """Each heartbeat sends the JSON keepalive and waits for a pong."""
+    pong = asyncio.get_running_loop().create_future()
+    pong.set_result(0.01)
+    mock_ws = MagicMock()
+    mock_ws.send = AsyncMock()
+    mock_ws.ping = AsyncMock(return_value=pong)
+    aws_websocket._websocket = mock_ws
+
+    with (
+        patch(
+            "custom_components.bestway.aws_iot.websocket.asyncio.sleep",
+            new=AsyncMock(side_effect=[None, asyncio.CancelledError()]),
+        ),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await aws_websocket._heartbeat_loop()
+
+    heartbeat_msg = json.loads(mock_ws.send.call_args.args[0])
+    assert heartbeat_msg["action"] == "heartbeat"
+    assert heartbeat_msg["req_event"] == "heartbeat_req"
+    assert "seq_id" in heartbeat_msg
+    mock_ws.ping.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_raises_when_pong_never_arrives(aws_websocket):
+    """A half-open connection is detected by the missing pong."""
+    mock_ws = MagicMock()
+    mock_ws.send = AsyncMock()
+    mock_ws.ping = AsyncMock(
+        return_value=asyncio.get_running_loop().create_future()  # never resolves
+    )
+    aws_websocket._websocket = mock_ws
+
+    with (
+        patch(
+            "custom_components.bestway.aws_iot.websocket.asyncio.sleep", new=AsyncMock()
+        ),
+        patch("custom_components.bestway.aws_iot.websocket.PONG_TIMEOUT", 0.01),
+        pytest.raises(TimeoutError),
+    ):
+        await aws_websocket._heartbeat_loop()
+
+
+@pytest.mark.asyncio
+async def test_reconnects_after_drop_and_failed_attempts(mock_callback):
+    """After a drop, the client reconnects, retrying through failures.
+
+    Regression: connect() bailed out with "already running" when called
+    after a drop, and the backoff path gave up after any failed attempt,
+    so a single drop (API Gateway closes every socket after 2 hours) left
+    the device on 30-second polling until Home Assistant restarted.
+    """
     connect_callback = MagicMock()
+    disconnect_callback = MagicMock()
     ws = AwsIotWebSocket(
         device_id="test_device_123",
         service_region="eu-central-1",
         token="test_token",
         update_callback=mock_callback,
+        disconnect_callback=disconnect_callback,
         connect_callback=connect_callback,
     )
+    update = json.dumps({"state": {"reported": {"power_state": 1}}})
+    outcomes = [_dropping_socket()]
+    outcomes += [OSError("Network unreachable")] * 3
+    outcomes += [_dropping_socket(messages=[update])]
+    reconnected = asyncio.Event()
+    mock_callback.side_effect = lambda *_: reconnected.set()
 
-    with patch(
-        "custom_components.bestway.aws_iot.websocket.websockets.connect"
-    ) as mock_connect:
-        mock_connect.side_effect = Exception("Connection refused")
+    with (
+        patch(
+            "custom_components.bestway.aws_iot.websocket.websockets.connect",
+            new=AsyncMock(side_effect=outcomes),
+        ) as mock_connect,
+        patch("homeassistant.util.ssl.get_default_context"),
+        patch("custom_components.bestway.websocket_base.RECONNECT_DELAYS", [0]),
+    ):
+        task = asyncio.create_task(ws.run())
+        await asyncio.wait_for(reconnected.wait(), timeout=2)
+        await ws.disconnect()
 
-        await ws.connect()
-
-    connect_callback.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_disconnect_callback_fires_on_initial_failure(mock_callback):
-    """disconnect_callback fires on a failed initial connection attempt.
-
-    Regression coverage for #133: previously this callback was never wired
-    to a failed connect() attempt, so a firewalled install stayed on
-    5-minute polling with no push updates ever arriving.
-    """
-    disconnect_callback = MagicMock()
-    ws = AwsIotWebSocket(
-        device_id="test_device_123",
-        service_region="eu-central-1",
-        token="test_token",
-        update_callback=mock_callback,
-        disconnect_callback=disconnect_callback,
-    )
-
-    with patch(
-        "custom_components.bestway.aws_iot.websocket.websockets.connect"
-    ) as mock_connect:
-        mock_connect.side_effect = Exception("Connection refused")
-
-        await ws.connect()
-
+    assert task.done()
+    assert mock_connect.call_count == 5
+    mock_callback.assert_called_once()
+    assert mock_callback.call_args.args[0] == "test_device_123"
+    assert connect_callback.call_count == 2
+    # Once for the whole outage, not once per failed retry.
     disconnect_callback.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_disconnect_callback_not_repeated_across_retries(mock_callback):
-    """disconnect_callback fires once per disconnected period, not per retry."""
-    disconnect_callback = MagicMock()
-    ws = AwsIotWebSocket(
-        device_id="test_device_123",
-        service_region="eu-central-1",
-        token="test_token",
-        update_callback=mock_callback,
-        disconnect_callback=disconnect_callback,
-    )
-
-    with patch(
-        "custom_components.bestway.aws_iot.websocket.websockets.connect"
-    ) as mock_connect:
-        mock_connect.side_effect = Exception("Connection refused")
-
-        await ws.connect()
-        await ws.connect()
-
-    disconnect_callback.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_open_timeout_passed_to_connect(aws_websocket):
-    """websockets.connect must be given an open_timeout.
-
-    Otherwise a firewall that silently drops packets leaves connect()
-    hanging on the OS-level TCP timeout rather than failing fast.
-    """
-    with patch(
-        "custom_components.bestway.aws_iot.websocket.websockets.connect"
-    ) as mock_connect:
-        mock_connect.side_effect = Exception("Connection refused")
-
-        await aws_websocket.connect()
-
-    call_kwargs = mock_connect.call_args.kwargs
-    assert call_kwargs.get("open_timeout") is not None
