@@ -55,7 +55,9 @@ All devices in your account will be automatically detected and added by the inte
 
 Spas don't report their electricity use, so each spa gets two estimated sensors: **Estimated Power** (W) and **Estimated Energy** (kWh). They assume a fixed draw for each running component - heater 2050 W while actively heating, bubbles 800 W, filter pump 50 W - and add these up over time. The heater is only counted while it is heating, not once the water has reached its target temperature.
 
-Estimated Energy can be added to the Home Assistant energy dashboard as an individual device. Treat it as a guide to running costs rather than a meter reading: actual draw varies by model, and the sensors' attributes show the wattages being assumed.
+Actual draw varies by model, so each figure can be changed under **Settings** > **Devices & Services** > **Bestway** > **Configure** - your spa's manual or rating plate lists them. The integration reloads when you save, and the energy total carries on from where it was, using the new figures from then on. The sensors' attributes show the wattages currently assumed.
+
+Estimated Energy can be added to the Home Assistant energy dashboard as an individual device. Treat it as a guide to running costs rather than a meter reading.
 
 ## Contributing
 

@@ -43,6 +43,13 @@ BUBBLES_MODE_3WAY = "three_way"
 BUBBLES_MODE_ONOFF = "on_off"
 BUBBLES_MODE_DEFAULT = BUBBLES_MODE_3WAY
 
+# Assumed per-component draw used by the estimated power/energy sensors.
+# Real draw varies by model, so users can correct the defaults.
+CONF_HEATER_WATTS = "heater_watts"
+CONF_BUBBLES_WATTS = "bubbles_watts"
+CONF_FILTER_WATTS = "filter_watts"
+CONF_JETS_WATTS = "jets_watts"
+
 
 class Icon(str, Enum):
     """Icon styles."""

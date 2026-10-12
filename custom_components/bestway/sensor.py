@@ -24,7 +24,7 @@ from homeassistant.helpers.typing import StateType
 
 from .const import DOMAIN, Icon
 from .coordinator import BestwayUpdateCoordinator
-from .energy import DEFAULT_WATTAGES, estimate_power_watts
+from .energy import estimate_power_watts, wattages_from_options
 from .entity import BestwayEntity
 from .features import VersionSensorSet, features_for
 from .model import BestwayDevice, DeviceStatus
@@ -120,13 +120,12 @@ _SHADOW_VERSION_SENSORS: tuple[BestwayStateSensorEntityDescription, ...] = (
 )
 
 
-_ESTIMATED_POWER_SENSOR = BestwayStateSensorEntityDescription(
+_ESTIMATED_POWER_SENSOR = SensorEntityDescription(
     key="estimated_power",
     name="{prefix} Estimated Power",
     native_unit_of_measurement=UnitOfPower.WATT,
     device_class=SensorDeviceClass.POWER,
     state_class=SensorStateClass.MEASUREMENT,
-    value_fn=estimate_power_watts,
 )
 
 _ESTIMATED_ENERGY_SENSOR = SensorEntityDescription(
@@ -144,9 +143,7 @@ _ESTIMATED_ENERGY_SENSOR = SensorEntityDescription(
 MAX_ENERGY_SAMPLE_GAP_S = 15 * 60
 
 
-def _named[
-    T: (BestwayDeviceSensorEntityDescription, BestwayStateSensorEntityDescription)
-](description: T, name_prefix: str) -> T:
+def _named[T: SensorEntityDescription](description: T, name_prefix: str) -> T:
     """Fill in a description's `{prefix}` name placeholder for one device."""
     return replace(description, name=str(description.name).format(prefix=name_prefix))
 
@@ -199,12 +196,7 @@ async def async_setup_entry(
                     coordinator,
                     config_entry,
                     device_id,
-                    replace(
-                        _ESTIMATED_ENERGY_SENSOR,
-                        name=str(_ESTIMATED_ENERGY_SENSOR.name).format(
-                            prefix=name_prefix
-                        ),
-                    ),
+                    _named(_ESTIMATED_ENERGY_SENSOR, name_prefix),
                 )
             )
 
@@ -261,28 +253,11 @@ class StateSensor(BestwayEntity, SensorEntity):
         return None
 
 
-def _wattage_attributes() -> dict[str, Any]:
-    """The per-component wattages an estimate assumes, so users can see
-    what the figure is based on."""
-    return {f"{name}_watts": watts for name, watts in asdict(DEFAULT_WATTAGES).items()}
+class _EstimateSensor(BestwayEntity):
+    """Shared setup for the sensors built on the configured spa wattages.
 
-
-class EstimatedPowerSensor(StateSensor):
-    """Estimated current power draw, from which components are running."""
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the wattages the estimate assumes."""
-        return _wattage_attributes()
-
-
-class EstimatedEnergySensor(BestwayEntity, RestoreSensor):
-    """Estimated cumulative energy use, for the Home Assistant energy dashboard.
-
-    Each coordinator update closes the interval since the previous one,
-    charging it at the power estimated at the *start* of that interval -
-    the state the spa was actually in while the time passed. The running
-    total is restored across restarts.
+    The wattages are read once here: changing them in the options reloads
+    the config entry, which recreates the entities.
     """
 
     def __init__(
@@ -296,6 +271,47 @@ class EstimatedEnergySensor(BestwayEntity, RestoreSensor):
         super().__init__(coordinator, config_entry, device_id)
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
+        self._wattages = wattages_from_options(config_entry.options)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the wattages the estimate assumes, so users can see what
+        the figure is based on."""
+        return {
+            f"{name}_watts": watts for name, watts in asdict(self._wattages).items()
+        }
+
+
+class EstimatedPowerSensor(_EstimateSensor, SensorEntity):
+    """Estimated current power draw, from which components are running."""
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the estimated draw in watts."""
+        if self.status is None:
+            return None
+        return estimate_power_watts(self.status, self._wattages)
+
+
+class EstimatedEnergySensor(_EstimateSensor, RestoreSensor):
+    """Estimated cumulative energy use, for the Home Assistant energy dashboard.
+
+    Each coordinator update closes the interval since the previous one,
+    charging it at the power estimated at the *start* of that interval -
+    the state the spa was actually in while the time passed. The running
+    total is restored across restarts, including when changed wattages
+    reload the entry; only time after the change uses the new figures.
+    """
+
+    def __init__(
+        self,
+        coordinator: BestwayUpdateCoordinator,
+        config_entry: ConfigEntry,
+        device_id: str,
+        description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, config_entry, device_id, description)
         self._energy_kwh = 0.0
         self._interval_watts: int | None = None
         self._interval_start: float | None = None
@@ -323,14 +339,11 @@ class EstimatedEnergySensor(BestwayEntity, RestoreSensor):
 
         self._interval_start = now
         status = self.status if self.coordinator.last_update_success else None
-        self._interval_watts = None if status is None else estimate_power_watts(status)
+        self._interval_watts = (
+            None if status is None else estimate_power_watts(status, self._wattages)
+        )
 
     @property
     def native_value(self) -> float:
         """Return the estimated energy used so far, in kWh."""
         return round(self._energy_kwh, 3)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the wattages the estimate assumes."""
-        return _wattage_attributes()

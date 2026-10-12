@@ -8,8 +8,16 @@ dashboard, not to replace a real meter.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
+from .const import (
+    CONF_BUBBLES_WATTS,
+    CONF_FILTER_WATTS,
+    CONF_HEATER_WATTS,
+    CONF_JETS_WATTS,
+)
 from .model import BubblesLevel, DeviceStatus, HeaterState
 
 
@@ -26,6 +34,24 @@ class SpaWattages:
 
 
 DEFAULT_WATTAGES = SpaWattages()
+
+
+def wattages_from_options(options: Mapping[str, Any]) -> SpaWattages:
+    """The wattages configured in the config entry options, falling back to
+    the defaults for any not set.
+
+    Values arrive as floats from the options form's number selectors.
+    """
+
+    def watts(key: str, default: int) -> int:
+        return int(options.get(key, default))
+
+    return SpaWattages(
+        heater=watts(CONF_HEATER_WATTS, DEFAULT_WATTAGES.heater),
+        bubbles=watts(CONF_BUBBLES_WATTS, DEFAULT_WATTAGES.bubbles),
+        filter=watts(CONF_FILTER_WATTS, DEFAULT_WATTAGES.filter),
+        jets=watts(CONF_JETS_WATTS, DEFAULT_WATTAGES.jets),
+    )
 
 
 def estimate_power_watts(

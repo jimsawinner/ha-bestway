@@ -7,16 +7,24 @@ from unittest.mock import patch
 import pytest
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.bestway.bestway.model import BestwayUserToken
 from custom_components.bestway.const import (
+    BUBBLES_MODE_3WAY,
     CONF_API_ROOT,
     CONF_API_ROOT_EU,
+    CONF_BUBBLES_MODE,
+    CONF_BUBBLES_WATTS,
+    CONF_FILTER_WATTS,
+    CONF_HEATER_WATTS,
+    CONF_JETS_WATTS,
     CONF_PASSWORD,
     CONF_USER_TOKEN,
     CONF_USERNAME,
     DOMAIN,
 )
+from custom_components.bestway.energy import DEFAULT_WATTAGES
 
 # Mock user input to the config flow
 MOCK_USER_INPUT = {
@@ -243,3 +251,39 @@ async def test_backend_selection_shows_both_options(hass):
     # Schema should have backend field with options
     schema_keys = list(result["data_schema"].schema.keys())
     assert any("backend" in str(key) for key in schema_keys)
+
+
+async def test_options_flow_wattages(hass):
+    """The options form offers the spa wattages, prefilled with the
+    defaults, and saves what the user enters."""
+    entry = MockConfigEntry(domain=DOMAIN, data=MOCK_USER_INPUT, options={})
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    defaults = {key.schema: key.default() for key in result["data_schema"].schema}
+    assert defaults[CONF_HEATER_WATTS] == DEFAULT_WATTAGES.heater
+    assert defaults[CONF_BUBBLES_WATTS] == DEFAULT_WATTAGES.bubbles
+    assert defaults[CONF_FILTER_WATTS] == DEFAULT_WATTAGES.filter
+    assert defaults[CONF_JETS_WATTS] == DEFAULT_WATTAGES.jets
+
+    user_input = {
+        CONF_BUBBLES_MODE: BUBBLES_MODE_3WAY,
+        CONF_HEATER_WATTS: 2800.0,
+        CONF_BUBBLES_WATTS: 720.0,
+        CONF_FILTER_WATTS: 40.0,
+        CONF_JETS_WATTS: 0.0,
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options == user_input
+
+    # Reopening the form shows the saved values.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = {key.schema: key.default() for key in result["data_schema"].schema}
+    assert defaults[CONF_HEATER_WATTS] == 2800
+    await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )

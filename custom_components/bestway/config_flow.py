@@ -34,6 +34,10 @@ from .const import (
     CONF_API_ROOT_US,
     CONF_BACKEND,
     CONF_BUBBLES_MODE,
+    CONF_BUBBLES_WATTS,
+    CONF_FILTER_WATTS,
+    CONF_HEATER_WATTS,
+    CONF_JETS_WATTS,
     CONF_LOCATION,
     CONF_PASSWORD,
     CONF_REGION,
@@ -50,6 +54,7 @@ from .const import (
     DOMAIN,
     Backend,
 )
+from .energy import wattages_from_options
 from .smartspa.api import (
     SMARTSPA_ENDPOINTS,
     SmartSpaApi,
@@ -416,6 +421,17 @@ class BestwayConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+_WATTS_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=0,
+        max=10000,
+        step=1,
+        unit_of_measurement="W",
+        mode=selector.NumberSelectorMode.BOX,
+    )
+)
+
+
 class BestwayOptionsFlowHandler(OptionsFlow):
     """Handle options for an existing Bestway config entry.
 
@@ -434,6 +450,7 @@ class BestwayOptionsFlowHandler(OptionsFlow):
         current_mode = self.config_entry.options.get(
             CONF_BUBBLES_MODE, BUBBLES_MODE_DEFAULT
         )
+        wattages = wattages_from_options(self.config_entry.options)
 
         return self.async_show_form(
             step_id="init",
@@ -455,6 +472,18 @@ class BestwayOptionsFlowHandler(OptionsFlow):
                             ]
                         )
                     ),
+                    vol.Required(
+                        CONF_HEATER_WATTS, default=wattages.heater
+                    ): _WATTS_SELECTOR,
+                    vol.Required(
+                        CONF_BUBBLES_WATTS, default=wattages.bubbles
+                    ): _WATTS_SELECTOR,
+                    vol.Required(
+                        CONF_FILTER_WATTS, default=wattages.filter
+                    ): _WATTS_SELECTOR,
+                    vol.Required(
+                        CONF_JETS_WATTS, default=wattages.jets
+                    ): _WATTS_SELECTOR,
                 }
             ),
         )

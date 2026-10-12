@@ -7,10 +7,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.components.sensor import SensorExtraStoredData
 
+from custom_components.bestway.const import (
+    CONF_BUBBLES_WATTS,
+    CONF_FILTER_WATTS,
+    CONF_HEATER_WATTS,
+    CONF_JETS_WATTS,
+)
 from custom_components.bestway.energy import (
     DEFAULT_WATTAGES,
     SpaWattages,
     estimate_power_watts,
+    wattages_from_options,
 )
 from custom_components.bestway.model import (
     BestwayApiResults,
@@ -46,9 +53,7 @@ _DEVICE_ID = "spa1"
         ),
         # The element cycles off once the water is up to temperature.
         (
-            DeviceStatus(
-                power=True, heater=HeaterState.TARGET_REACHED, filtering=True
-            ),
+            DeviceStatus(power=True, heater=HeaterState.TARGET_REACHED, filtering=True),
             FILTER,
         ),
         (DeviceStatus(power=True, bubbles=BubblesLevel.OFF), 0),
@@ -77,6 +82,12 @@ def test_estimate_power_watts_custom_wattages() -> None:
     assert estimate_power_watts(status, SpaWattages(jets=1000, filter=60)) == 1060
 
 
+def _config_entry(options: dict | None = None) -> MagicMock:
+    config_entry = MagicMock()
+    config_entry.options = options or {}
+    return config_entry
+
+
 def _coordinator(status: DeviceStatus) -> MagicMock:
     coordinator = MagicMock()
     coordinator.data = BestwayApiResults(devices={_DEVICE_ID: status})
@@ -86,7 +97,7 @@ def _coordinator(status: DeviceStatus) -> MagicMock:
 
 def _energy_sensor(coordinator: MagicMock) -> EstimatedEnergySensor:
     return EstimatedEnergySensor(
-        coordinator, MagicMock(), _DEVICE_ID, _ESTIMATED_ENERGY_SENSOR
+        coordinator, _config_entry(), _DEVICE_ID, _ESTIMATED_ENERGY_SENSOR
     )
 
 
@@ -111,7 +122,7 @@ def test_power_sensor_reports_estimate() -> None:
     """The power sensor reads the estimate and exposes its assumptions."""
     status = DeviceStatus(power=True, heater=HeaterState.HEATING, filtering=True)
     sensor = EstimatedPowerSensor(
-        _coordinator(status), MagicMock(), _DEVICE_ID, _ESTIMATED_POWER_SENSOR
+        _coordinator(status), _config_entry(), _DEVICE_ID, _ESTIMATED_POWER_SENSOR
     )
 
     assert sensor.native_value == HEATER + FILTER
@@ -180,14 +191,16 @@ def test_energy_not_counted_while_updates_fail(clock) -> None:
     [(12.5, 12.5), ("not a number", 0.0), (None, 0.0)],
 )
 async def test_energy_total_restored_after_restart(
-    clock, restored: object, expected: float
+    clock, restored: str | float | None, expected: float
 ) -> None:
     """The running total continues from the last recorded value."""
     sensor = _energy_sensor(_coordinator(DeviceStatus(power=True)))
     last = (
         None
         if restored is None
-        else SensorExtraStoredData(native_value=restored, native_unit_of_measurement="kWh")
+        else SensorExtraStoredData(
+            native_value=restored, native_unit_of_measurement="kWh"
+        )
     )
 
     with (
@@ -204,3 +217,45 @@ async def test_energy_total_restored_after_restart(
         await sensor.async_added_to_hass()
 
     assert sensor.native_value == expected
+
+
+def test_wattages_from_options_defaults() -> None:
+    """With nothing configured, the defaults apply."""
+    assert wattages_from_options({}) == DEFAULT_WATTAGES
+
+
+def test_wattages_from_options_overrides() -> None:
+    """Configured values override the defaults, one at a time or all
+    together; the form's float values become whole watts."""
+    assert wattages_from_options({CONF_HEATER_WATTS: 2800.0}) == SpaWattages(
+        heater=2800
+    )
+    assert wattages_from_options(
+        {
+            CONF_HEATER_WATTS: 2800.0,
+            CONF_BUBBLES_WATTS: 720.0,
+            CONF_FILTER_WATTS: 40.0,
+            CONF_JETS_WATTS: 600.0,
+        }
+    ) == SpaWattages(heater=2800, bubbles=720, filter=40, jets=600)
+
+
+def test_sensors_use_configured_wattages(clock) -> None:
+    """Both sensors use the wattages from the entry options, and report them."""
+    options = {CONF_HEATER_WATTS: 3000.0, CONF_FILTER_WATTS: 100.0}
+    status = DeviceStatus(power=True, heater=HeaterState.HEATING, filtering=True)
+    coordinator = _coordinator(status)
+
+    power = EstimatedPowerSensor(
+        coordinator, _config_entry(options), _DEVICE_ID, _ESTIMATED_POWER_SENSOR
+    )
+    assert power.native_value == 3100
+    assert power.extra_state_attributes["heater_watts"] == 3000
+
+    energy = EstimatedEnergySensor(
+        coordinator, _config_entry(options), _DEVICE_ID, _ESTIMATED_ENERGY_SENSOR
+    )
+    energy._sample()
+    clock.now += 360  # six minutes
+    energy._sample()
+    assert energy.native_value == pytest.approx(3100 / 1000 / 10)
