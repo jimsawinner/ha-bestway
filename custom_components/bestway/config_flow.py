@@ -40,6 +40,7 @@ from .const import (
     CONF_JETS_WATTS,
     CONF_LOCATION,
     CONF_PASSWORD,
+    CONF_POLL_INTERVAL,
     CONF_REGION,
     CONF_SMARTSPA_ACCOUNT,
     CONF_SMARTSPA_PASSWORD,
@@ -51,7 +52,10 @@ from .const import (
     CONF_USER_TOKEN_EXPIRY,
     CONF_USERNAME,
     CONF_VISITOR_ID,
+    DEFAULT_POLL_INTERVAL,
     DOMAIN,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
     Backend,
 )
 from .energy import wattages_from_options
@@ -451,6 +455,9 @@ class BestwayOptionsFlowHandler(OptionsFlow):
             CONF_BUBBLES_MODE, BUBBLES_MODE_DEFAULT
         )
         wattages = wattages_from_options(self.config_entry.options)
+        poll_interval = self.config_entry.options.get(
+            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -470,6 +477,17 @@ class BestwayOptionsFlowHandler(OptionsFlow):
                                     label="On / Off only",
                                 ),
                             ]
+                        )
+                    ),
+                    vol.Required(
+                        CONF_POLL_INTERVAL, default=poll_interval
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=MIN_POLL_INTERVAL,
+                            max=MAX_POLL_INTERVAL,
+                            step=1,
+                            unit_of_measurement="s",
+                            mode=selector.NumberSelectorMode.BOX,
                         )
                     ),
                     vol.Required(

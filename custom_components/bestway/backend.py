@@ -18,6 +18,11 @@ class BackendApi(Protocol):
     # Populated by refresh_bindings(); entities read it via coordinator.api.devices.
     devices: dict[str, BestwayDevice]
 
+    # Seconds a control write takes to show up in fetch_data(). The
+    # coordinator re-polls across this window after a command, and entities
+    # hold their optimistic value long enough to span it.
+    command_settle_s: float
+
     async def refresh_bindings(self) -> None: ...
     async def fetch_data(self) -> BestwayApiResults: ...
 

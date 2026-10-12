@@ -98,6 +98,18 @@ class BestwayEntity(CoordinatorEntity[BestwayUpdateCoordinator]):
             sw_version=device.mcu_soft_version,  # Add version info
         )
 
+    def _new_optimistic[T](self) -> OptimisticValue[T]:
+        """An OptimisticValue held long enough to cover this backend's
+        command settle time.
+
+        The coordinator re-polls at one and two settle periods after a
+        command; an optimistic value that expired before those polls would
+        flash the entity back to its pre-command state while the write is
+        still landing.
+        """
+        settle = self.coordinator.api.command_settle_s
+        return OptimisticValue[T](OPTIMISTIC_TIMEOUT_S + 2 * settle)
+
     @property
     def bestway_device(self) -> BestwayDevice | None:
         """Get status data for the spa providing this entity."""

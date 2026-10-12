@@ -95,6 +95,10 @@ class SmartSpaApi(RawStateApi):
     from RawStateApi) is only ever driven by fetch_data's own polled state.
     """
 
+    # Writes are applied ~5-10 s after the gateway accepts them (quirk 3),
+    # so a shadow read straight after a command still shows the old state.
+    command_settle_s = 10.0
+
     def __init__(
         self,
         session: ClientSession,

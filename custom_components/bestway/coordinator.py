@@ -1,7 +1,8 @@
 """Data update coordinator for the Bestway API."""
 
 import asyncio
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from logging import getLogger
 from time import time
 from typing import Any
@@ -9,9 +10,11 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .backend import BackendApi
+from .const import CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
 from .features import features_for
 from .model import BestwayApiResults, BestwayDeviceType
 from .smartspa.api import SmartSpaAuthException
@@ -30,14 +33,21 @@ class BestwayUpdateCoordinator(DataUpdateCoordinator[BestwayApiResults]):
         api: BackendApi,
     ) -> None:
         """Initialize my coordinator."""
+        # The interval polled at whenever no WebSocket is delivering updates.
+        self._poll_interval = timedelta(
+            seconds=int(
+                config_entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+            )
+        )
         super().__init__(
             hass,
             _LOGGER,
             config_entry=config_entry,
             name="Bestway API",
-            update_interval=timedelta(seconds=30),
+            update_interval=self._poll_interval,
         )
         self.api = api
+        self._cancel_confirm_refreshes: list[Callable[[], None]] = []
         self._ws_last_update: dict[str, float] = {}  # Track WebSocket update times
         self._logged_inventory: frozenset[tuple[str, BestwayDeviceType]] = frozenset()
         # One entry per backend connection: a single Gizwits socket, or one
@@ -116,15 +126,51 @@ class BestwayUpdateCoordinator(DataUpdateCoordinator[BestwayApiResults]):
         # Trigger immediate entity updates
         self.async_set_updated_data(results)
 
+    async def async_refresh_after_command(self) -> None:
+        """Refresh after a control write, and keep re-polling until the
+        backend will have applied it.
+
+        A backend whose writes take a while to land (command_settle_s) would
+        otherwise only show the result at the next scheduled poll: the
+        immediate refresh still reads the old state.
+        """
+        await self.async_request_refresh()
+
+        settle = self.api.command_settle_s
+        if settle <= 0:
+            return
+        # A newer command supersedes the confirmation polls of an older one.
+        self._cancel_pending_confirm_refreshes()
+        self._cancel_confirm_refreshes = [
+            async_call_later(self.hass, delay, self._async_confirm_refresh)
+            for delay in (settle, settle * 2)
+        ]
+
+    async def _async_confirm_refresh(self, _now: datetime) -> None:
+        await self.async_request_refresh()
+
+    def _cancel_pending_confirm_refreshes(self) -> None:
+        for cancel in self._cancel_confirm_refreshes:
+            cancel()
+        self._cancel_confirm_refreshes = []
+
+    async def async_shutdown(self) -> None:
+        """Cancel pending confirmation polls along with the coordinator."""
+        self._cancel_pending_confirm_refreshes()
+        await super().async_shutdown()
+
     def handle_websocket_disconnect(self) -> None:
         """Handle WebSocket disconnection.
 
-        Increases polling frequency to 30 seconds as fallback when
-        WebSocket connection is lost. This ensures the integration
-        continues functioning reliably even without real-time updates.
+        Reverts to the configured polling interval as a fallback when the
+        WebSocket connection is lost, so the integration keeps working
+        without real-time updates.
         """
-        _LOGGER.warning("WebSocket disconnected, reverting to 30-second polling")
-        self.update_interval = timedelta(seconds=30)
+        _LOGGER.warning(
+            "WebSocket disconnected, reverting to %d-second polling",
+            self._poll_interval.total_seconds(),
+        )
+        self.update_interval = self._poll_interval
 
     def set_websocket_active(self) -> None:
         """Set polling interval for WebSocket-active mode.

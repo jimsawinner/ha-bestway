@@ -51,6 +51,12 @@ All devices in your account will be automatically detected and added by the inte
 
 **Region selection:** Users have reported that the actual region for accounts is not necessarily as expected. If your first guess doesn't work (either failing to log in, or no devices found), try another region.
 
+## Update Speed
+
+V1 and V2 logins receive live updates from the spa. Bestway Connect account logins (the third login option) currently rely on polling, every 30 seconds by default. Under **Settings** > **Devices & Services** > **Bestway** > **Configure** you can poll more often (down to 10 seconds) so changes made on the spa or in the app show up sooner, at the cost of more requests to Bestway's cloud.
+
+Commands sent from Home Assistant take 5-10 seconds to reach the spa on these logins. Controls show the new setting straight away and check back with the spa until it confirms the change.
+
 ## Estimated Energy
 
 Spas don't report their electricity use, so each spa gets two estimated sensors: **Estimated Power** (W) and **Estimated Energy** (kWh). They assume a fixed draw for each running component - heater 2050 W while actively heating, bubbles 800 W, filter pump 50 W - and add these up over time. The heater is only counted while it is heating, not once the water has reached its target temperature.

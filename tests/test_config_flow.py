@@ -20,8 +20,10 @@ from custom_components.bestway.const import (
     CONF_HEATER_WATTS,
     CONF_JETS_WATTS,
     CONF_PASSWORD,
+    CONF_POLL_INTERVAL,
     CONF_USER_TOKEN,
     CONF_USERNAME,
+    DEFAULT_POLL_INTERVAL,
     DOMAIN,
 )
 from custom_components.bestway.energy import DEFAULT_WATTAGES
@@ -262,6 +264,7 @@ async def test_options_flow_wattages(hass):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == FlowResultType.FORM
     defaults = {key.schema: key.default() for key in result["data_schema"].schema}
+    assert defaults[CONF_POLL_INTERVAL] == DEFAULT_POLL_INTERVAL
     assert defaults[CONF_HEATER_WATTS] == DEFAULT_WATTAGES.heater
     assert defaults[CONF_BUBBLES_WATTS] == DEFAULT_WATTAGES.bubbles
     assert defaults[CONF_FILTER_WATTS] == DEFAULT_WATTAGES.filter
@@ -269,6 +272,7 @@ async def test_options_flow_wattages(hass):
 
     user_input = {
         CONF_BUBBLES_MODE: BUBBLES_MODE_3WAY,
+        CONF_POLL_INTERVAL: 15.0,
         CONF_HEATER_WATTS: 2800.0,
         CONF_BUBBLES_WATTS: 720.0,
         CONF_FILTER_WATTS: 40.0,
@@ -284,6 +288,7 @@ async def test_options_flow_wattages(hass):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     defaults = {key.schema: key.default() for key in result["data_schema"].schema}
     assert defaults[CONF_HEATER_WATTS] == 2800
+    assert defaults[CONF_POLL_INTERVAL] == 15
     await hass.config_entries.options.async_configure(
         result["flow_id"], user_input=user_input
     )

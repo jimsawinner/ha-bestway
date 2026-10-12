@@ -75,7 +75,7 @@ On the read side, all three converge on `translation.py`: `status_from_attrs()` 
 
 ### Update flow
 
-The coordinator polls every 30 seconds by default. When a WebSocket connects successfully, polling drops to 5 minutes (`set_websocket_active()`). WebSocket updates call `handle_websocket_update()`, which delegates to the backend's `handle_partial_update()` (merges the partial delta into its raw state cache and translates it into a fresh `DeviceStatus`) and pushes the result via `async_set_updated_data()`.
+The coordinator polls every 30 seconds by default (the `poll_interval` option). When a WebSocket connects successfully, polling drops to 5 minutes (`set_websocket_active()`). After a control command, entities call `async_refresh_after_command()`: on a backend whose writes take a while to land (`command_settle_s`, e.g. SmartSpa) it re-polls at one and two settle periods, and entities size their optimistic values to outlast those polls. WebSocket updates call `handle_websocket_update()`, which delegates to the backend's `handle_partial_update()` (merges the partial delta into its raw state cache and translates it into a fresh `DeviceStatus`) and pushes the result via `async_set_updated_data()`.
 
 ### State cache pattern
 

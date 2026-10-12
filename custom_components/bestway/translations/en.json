@@ -56,6 +56,7 @@
         "description": "Adjust how the integration represents your spa in Home Assistant. Changes apply after the integration reloads.",
         "data": {
           "bubbles_mode": "Bubble control (Airjet V02 / Hydrojet V02)",
+          "poll_interval": "Polling interval",
           "heater_watts": "Heater power",
           "bubbles_watts": "Bubbles power",
           "filter_watts": "Filter pump power",
@@ -63,6 +64,7 @@
         },
         "data_description": {
           "bubbles_mode": "Some Airjet V02 hot tubs only have on/off bubbles physically, even though the cloud accepts a 3-level value. Pick the option that matches your hardware. Changes apply after the integration reloads.",
+          "poll_interval": "How often to fetch the spa's state when no live connection is delivering updates (always the case for Bestway Connect account logins). Shorter shows changes made on the spa or in the app sooner, but sends more requests to Bestway's cloud.",
           "heater_watts": "Draw while the heater is actively heating. Used by the Estimated Power and Estimated Energy sensors; check your spa's manual or rating plate.",
           "bubbles_watts": "Draw while the bubbles are on, at any level.",
           "filter_watts": "Draw while the filter pump runs.",

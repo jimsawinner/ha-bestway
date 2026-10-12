@@ -57,10 +57,11 @@ def _make_coordinator(device: BestwayDevice, status: DeviceStatus):
     """Create a mock coordinator with the given device and status."""
     coordinator = MagicMock()
     coordinator.api = MagicMock()
+    coordinator.api.command_settle_s = 0.0
     coordinator.api.devices = {"test_device": device}
     coordinator.data = BestwayApiResults(devices={"test_device": status})
     coordinator.last_update_success = True
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_refresh_after_command = AsyncMock()
     coordinator.async_refresh = AsyncMock()
     return coordinator
 
@@ -105,6 +106,7 @@ class TestEntityAvailability:
 
         coordinator = MagicMock()
         coordinator.api = MagicMock()
+        coordinator.api.command_settle_s = 0.0
         coordinator.api.devices = {}  # No devices
         coordinator.last_update_success = True
         config_entry = MagicMock()
@@ -214,7 +216,7 @@ class TestSwitchOptimistic:
     def test_switch_optimistic_kept_when_real_state_lags(self):
         """Optimistic state survives a refresh that hasn't yet caught the change.
 
-        Without this, the UI flickers ON -> OFF -> ON when async_request_refresh
+        Without this, the UI flickers ON -> OFF -> ON when the post-command refresh
         fires before the Bestway cloud has acked the command and the shadow
         still reports the previous value.
         """
@@ -387,6 +389,7 @@ class TestClimateTunitSafety:
         device = _make_device()
         coordinator = MagicMock()
         coordinator.api = MagicMock()
+        coordinator.api.command_settle_s = 0.0
         coordinator.api.devices = {"test_device": device}
         coordinator.data = BestwayApiResults(devices={})
         coordinator.last_update_success = True

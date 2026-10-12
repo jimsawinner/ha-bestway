@@ -148,7 +148,7 @@ class BestwaySwitch(BestwayEntity, SwitchEntity):
         super().__init__(coordinator, config_entry, device_id)
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
-        self._optimistic = OptimisticValue[bool]()
+        self._optimistic: OptimisticValue[bool] = self._new_optimistic()
 
     @property
     def is_on(self) -> bool | None:
@@ -180,11 +180,11 @@ class BestwaySwitch(BestwayEntity, SwitchEntity):
         self._optimistic.set(True)
         self.async_write_ha_state()
         await self.entity_description.turn_on_fn(self.coordinator.api, self.device_id)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_after_command()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         self._optimistic.set(False)
         self.async_write_ha_state()
         await self.entity_description.turn_off_fn(self.coordinator.api, self.device_id)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_after_command()

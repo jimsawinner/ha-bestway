@@ -65,7 +65,7 @@ class ThreeWaySpaBubblesSelect(BestwayEntity, SelectEntity):
         """Initialize select."""
         super().__init__(coordinator, config_entry, device_id)
         self._attr_unique_id = f"{device_id}_{self.entity_description.key}"
-        self._optimistic = OptimisticValue[BubblesLevel]()
+        self._optimistic: OptimisticValue[BubblesLevel] = self._new_optimistic()
 
     @property
     def current_option(self) -> str | None:
@@ -91,4 +91,4 @@ class ThreeWaySpaBubblesSelect(BestwayEntity, SelectEntity):
         self._optimistic.set(bubbles_level)
         self.async_write_ha_state()
         await self.coordinator.api.set_bubbles(self.device_id, bubbles_level)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_after_command()

@@ -33,6 +33,10 @@ class RawStateApi:
     reaching into backend internals.
     """
 
+    # Seconds a control write takes to show up in fetch_data(). Zero means
+    # the next read already reflects it, so one refresh confirms a command.
+    command_settle_s: float = 0.0
+
     def __init__(self) -> None:
         """Initialize the empty device registry and raw-state cache."""
         # Populated by refresh_bindings(); entities read it via coordinator.api.devices.

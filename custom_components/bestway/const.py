@@ -50,6 +50,14 @@ CONF_BUBBLES_WATTS = "bubbles_watts"
 CONF_FILTER_WATTS = "filter_watts"
 CONF_JETS_WATTS = "jets_watts"
 
+# Seconds between polls when no WebSocket is delivering updates - always the
+# case on the SmartSpa backend. Shorter intervals show changes made outside
+# Home Assistant sooner, at the cost of more requests to Bestway's cloud.
+CONF_POLL_INTERVAL = "poll_interval"
+DEFAULT_POLL_INTERVAL = 30
+MIN_POLL_INTERVAL = 10
+MAX_POLL_INTERVAL = 300
+
 
 class Icon(str, Enum):
     """Icon styles."""

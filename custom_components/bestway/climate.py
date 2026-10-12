@@ -69,8 +69,8 @@ class SpaThermostat(BestwayEntity, ClimateEntity):
         """Initialize thermostat."""
         super().__init__(coordinator, config_entry, device_id)
         self._attr_unique_id = f"{device_id}_thermostat"
-        self._optimistic_heat = OptimisticValue[bool]()
-        self._optimistic_tset = OptimisticValue[int]()
+        self._optimistic_heat: OptimisticValue[bool] = self._new_optimistic()
+        self._optimistic_tset: OptimisticValue[int] = self._new_optimistic()
 
     def _handle_coordinator_update(self) -> None:
         """Clear optimistic state once real data confirms it, or after a
@@ -166,7 +166,7 @@ class SpaThermostat(BestwayEntity, ClimateEntity):
         self._optimistic_heat.set(want_heat)
         self.async_write_ha_state()
         await self.coordinator.api.set_heat(self.device_id, want_heat)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_after_command()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set a new target temperature."""
@@ -184,4 +184,4 @@ class SpaThermostat(BestwayEntity, ClimateEntity):
         await self.coordinator.api.set_target_temperature(
             self.device_id, target_temperature
         )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_after_command()

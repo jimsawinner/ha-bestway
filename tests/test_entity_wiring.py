@@ -56,6 +56,7 @@ def _make_coordinator(device: BestwayDevice, status: DeviceStatus) -> MagicMock:
     """A coordinator whose api exposes every semantic setter as an AsyncMock."""
     coordinator = MagicMock()
     coordinator.api = MagicMock()
+    coordinator.api.command_settle_s = 0.0
     coordinator.api.devices = {"test_device": device}
     for method in (
         "set_power",
@@ -70,7 +71,7 @@ def _make_coordinator(device: BestwayDevice, status: DeviceStatus) -> MagicMock:
         setattr(coordinator.api, method, AsyncMock())
     coordinator.data = BestwayApiResults(devices={"test_device": status})
     coordinator.last_update_success = True
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_refresh_after_command = AsyncMock()
     return coordinator
 
 
